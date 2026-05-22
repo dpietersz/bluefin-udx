@@ -74,6 +74,13 @@ System libraries the official Playwright Fedora deps list requires. Bake the lib
 | `cuda-toolkit` | NVIDIA CUDA Fedora repo | nvidia — conda is hard to install on atomic, so bake the toolkit |
 | `nvtop` | Fedora repo | nvidia (GPU monitoring) |
 
+## System-wide config files (non-package bakes)
+
+| Path in image | Purpose | Why baked |
+|---|---|---|
+| `/usr/share/wayland-sessions/niri.desktop` | Override `DesktopNames=niri` → `niri;GNOME` so display managers export an XDG_CURRENT_DESKTOP value Chromium recognises | Electron password-store detection — without `GNOME` in the tag, Storage Explorer / Vibe Typer fall back to plaintext backend and refuse to start despite a fully functional `org.freedesktop.secrets` |
+| `/usr/lib/environment.d/50-electron-keyring.conf` | Appends `:GNOME` to XDG_CURRENT_DESKTOP for the systemd user manager and everything it spawns | Belt-and-braces for sessions launched outside the DM (TTY, nested compositors) — same root cause as the niri.desktop override |
+
 ## Explicitly NOT baked (with reasoning)
 
 | App | Why not | Lives where |
