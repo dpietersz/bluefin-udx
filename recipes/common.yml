@@ -48,3 +48,46 @@ modules:
   - type: script
     scripts:
       - teams-wayland-patch.sh
+
+  # ---------------------------------------------------------------------------
+  # PHASE 2 — system packages migrated out of dotfiles/.chezmoiscripts/
+  # Replaces:
+  #   02-install-kitty   tmux   nushell
+  #   00b-install-polkit-agent (mate-polkit)
+  #   01a-install-syncthing
+  #   04-install-niri  (niri + waybar + supporting tools, via yalter/niri COPR)
+  #   02-install-espanso (espanso-wayland via Terra)
+  #   11-install-hyprlock-stack (hyprlock from Terra, swayidle from Fedora)
+  #   05-install-noctalia (noctalia-shell-v5 from lionheartp/Hyprland COPR)
+  # ---------------------------------------------------------------------------
+  - type: rpm-ostree
+    repos:
+      # Terra — espanso-wayland and hyprlock live here. The Terra RPM ships
+      # CAP_DAC_OVERRIDE pre-set on espanso, so no separate setcap module.
+      - https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo
+      # niri compositor + supporting tools
+      - https://copr.fedorainfracloud.org/coprs/yalter/niri/repo/fedora-%OS_VERSION%/yalter-niri-fedora-%OS_VERSION%.repo
+      # noctalia-shell-v5
+      - https://copr.fedorainfracloud.org/coprs/lionheartp/Hyprland/repo/fedora-%OS_VERSION%/lionheartp-Hyprland-fedora-%OS_VERSION%.repo
+    install:
+      # Fedora base repos
+      - kitty
+      - tmux
+      # nushell intentionally NOT baked — installed via Homebrew on both
+      # macOS and Linux (single cross-platform source of truth).
+      - mate-polkit
+      - syncthing
+      - swayidle
+      # niri COPR
+      - niri
+      - waybar
+      - pavucontrol
+      - NetworkManager-tui
+      - blueman
+      - SwayNotificationCenter   # binary: swaync
+      # Terra
+      - espanso-wayland
+      - hyprlock
+      # lionheartp/Hyprland COPR
+      - noctalia-shell-v5
+
