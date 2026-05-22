@@ -50,6 +50,17 @@ modules:
       - teams-wayland-patch.sh
 
   # ---------------------------------------------------------------------------
+  # Paseo desktop (https://paseo.sh).
+  # No vendor yum repo and asset filenames embed the version, so we resolve
+  # the latest x86_64 RPM from the GitHub release API at image build time.
+  # Every image rebuild = freshest Paseo. CLI counterpart (@getpaseo/cli) is
+  # installed per-user via chezmoi (run_onchange_after_18-install-paseo-cli).
+  # ---------------------------------------------------------------------------
+  - type: script
+    scripts:
+      - install-paseo-latest.sh
+
+  # ---------------------------------------------------------------------------
   # PHASE 2 — system packages migrated out of dotfiles/.chezmoiscripts/
   # Replaces:
   #   02-install-kitty   tmux   nushell
