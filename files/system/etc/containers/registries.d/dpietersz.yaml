@@ -1,0 +1,10 @@
+# Sigstore attachment lookup for ghcr.io/dpietersz/* images.
+# Required so containers/image (used by skopeo, podman, bootc, rpm-ostree)
+# knows to fetch cosign signatures attached to the manifest as OCI artifacts
+# rather than via a separate lookaside URL.
+#
+# Pairs with the policy.json entry for ghcr.io/dpietersz keyed against
+# /usr/lib/pki/containers/bluefin-udx-nvidia.pub (installed by this image).
+docker:
+  ghcr.io/dpietersz:
+    use-sigstore-attachments: true

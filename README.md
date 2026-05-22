@@ -85,13 +85,28 @@ So in practice: you reboot when you feel like it; you're always within 24 hours 
 
 Images are signed with `cosign`. Public key: [`cosign.pub`](./cosign.pub).
 
-To verify:
+The pubkey, a `containers/registries.d` snippet, and the matching `policy.json`
+entry are all baked into the image itself (see `files/system/usr/lib/pki/containers/`,
+`files/system/etc/containers/registries.d/dpietersz.yaml`, and
+`files/scripts/install-cosign-policy.sh`). After the first `ostree-unverified-registry:`
+rebase to bootstrap the trust files, switch over to the signed URL so every
+subsequent pull verifies the cosign signature before deploying:
 
 ```bash
-cosign verify --key cosign.pub ghcr.io/dpietersz/bluefin-udx:stable
+sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/dpietersz/bluefin-udx-nvidia:stable
+sudo systemctl reboot
 ```
 
-(Cosign-signed bootc rebase uses the `ostree-image-signed:` URL prefix with `/etc/pki/containers/` configured. Currently using `ostree-unverified-registry:` until I wire client-side verification end-to-end.)
+(Use the `bluefin-udx` image without the `-nvidia` suffix on Intel/AMD machines.)
+
+To verify manually from userspace:
+
+```bash
+cosign verify --key cosign.pub ghcr.io/dpietersz/bluefin-udx-nvidia:stable
+```
+
+After the reboot, `rpm-ostree status` should show `ostree-image-signed:docker://…`
+instead of `ostree-unverified-registry:…`.
 
 ## Local iteration (for fork maintainers)
 

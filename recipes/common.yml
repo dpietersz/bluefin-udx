@@ -61,6 +61,19 @@ modules:
       - install-paseo-latest.sh
 
   # ---------------------------------------------------------------------------
+  # Client-side cosign verification for ghcr.io/dpietersz/* images.
+  # Wires policy.json + registries.d so `rpm-ostree rebase ostree-image-signed:`
+  # validates the image signature against the bundled cosign pubkey at
+  # /usr/lib/pki/containers/bluefin-udx-nvidia.pub before deploying.
+  # Pubkey + registries.d snippet land via the files module above; this script
+  # merges the policy.json entry (the only piece that can't be a static overlay
+  # without clobbering upstream Bluefin entries).
+  # ---------------------------------------------------------------------------
+  - type: script
+    scripts:
+      - install-cosign-policy.sh
+
+  # ---------------------------------------------------------------------------
   # PHASE 2 — system packages migrated out of dotfiles/.chezmoiscripts/
   # Replaces:
   #   02-install-kitty   tmux   nushell
