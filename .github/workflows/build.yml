@@ -60,18 +60,32 @@ jobs:
           bluebuild --version
 
       # ----------------------------------------------------------------------
-      # BUILD LOCALLY — no push, no sign. Use docker driver since the runner
-      # already has a docker daemon; smoke + push all use docker, so storage
-      # stays consistent.
+      # BUILD LOCALLY — no push, no sign.
+      # We use `bluebuild generate` (which emits a plain Containerfile) then
+      # build it with `docker buildx build --load`, which puts the image
+      # directly into the docker store. This avoids the docker-container
+      # buildx driver's "no output specified" behavior that bluebuild build
+      # triggers by default.
       # ----------------------------------------------------------------------
-      - name: Build (local, no push)
-        env:
-          BB_BUILD_PUSH: "false"
-          RUST_LOG_STYLE: always
-          CLICOLOR_FORCE: "1"
+      - name: Generate Containerfile
         run: |
           set -euo pipefail
-          bluebuild build --no-sign --build-driver docker "recipes/${{ matrix.recipe }}.yml"
+          bluebuild generate \
+            --registry "${IMAGE_REGISTRY}" \
+            --registry-namespace "${{ github.repository_owner }}" \
+            -o Containerfile.generated \
+            "recipes/${{ matrix.recipe }}.yml"
+          echo "=== Containerfile head ==="
+          head -30 Containerfile.generated
+
+      - name: Build with docker buildx (load into docker store)
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --load \
+            -t "localhost/${{ matrix.recipe }}:latest" \
+            -f Containerfile.generated \
+            .
           echo "Images in local docker store after build:"
           docker images --format "{{.Repository}}:{{.Tag}}" | head -20
 
