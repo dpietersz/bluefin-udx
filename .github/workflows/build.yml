@@ -138,6 +138,19 @@ jobs:
             done
             echo "Phase 3b GUI apps:"
             check_rpm beekeeper-studio
+            echo "Phase 3c additions:"
+            check_rpm zed
+            check_rpm postgresql
+            check_bin psql
+            # NVIDIA variant adds nvtop. CUDA toolkit not baked — use
+            # nvidia/cuda containers per project (atomic /usr/local quirk).
+            if [ "${{ matrix.recipe }}" = "bluefin-udx-nvidia" ]; then
+                echo "Phase 4 NVIDIA additions:"
+                check_rpm nvtop
+                check_bin nvtop
+                check_bin nvidia-smi
+                check_bin nvidia-ctk
+            fi
             exit $FAIL
           '
 

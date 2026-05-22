@@ -51,7 +51,7 @@ echo "==> Smoke-boot test against $IMAGE (via $RUNNER)"
 #    /usr/lib/opt). Inside a `run` container /var/opt is empty so the
 #    /usr/bin/teams-for-linux symlink chain dead-ends. Verify the rpm is
 #    installed AND the wrapped binary lives at its real /usr/lib/opt path.
-$RUNNER run --rm --entrypoint /bin/bash "$IMAGE" -c '
+$RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     set -e
     FAIL=0
     check_bin() {
@@ -84,6 +84,22 @@ $RUNNER run --rm --entrypoint /bin/bash "$IMAGE" -c '
     done
     echo "Phase 3b GUI apps:"
     check_rpm beekeeper-studio
+    echo "Phase 3c additions:"
+    check_rpm zed
+    check_rpm postgresql
+    check_bin psql
+
+    # NVIDIA variant adds nvtop. CUDA toolkit intentionally not baked —
+    # incompatible with atomic /usr/local redirect; use nvidia/cuda containers
+    # per project instead. See bluefin-udx-nvidia.yml for full rationale.
+    if [ "$RECIPE_NAME" = "bluefin-udx-nvidia" ]; then
+        echo "Phase 4 NVIDIA additions:"
+        check_rpm nvtop
+        check_bin nvtop
+        # Base bluefin-dx-nvidia-open already provides:
+        check_bin nvidia-smi
+        check_bin nvidia-ctk
+    fi
 
     exit $FAIL
 '

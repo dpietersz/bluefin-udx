@@ -19,13 +19,27 @@ modules:
   - from-file: common.yml
 
   # ---------------------------------------------------------------------------
-  # Phase 4 placeholder — NVIDIA-only additions (cuda-toolkit, nvtop).
-  # Intentionally commented out until Phase 4 cutover; uncomment per
-  # /var/home/pietersz/dotfiles/Plans/* migration plan.
+  # Phase 4 — NVIDIA-only additions.
+  #
+  # NOT baked: cuda-toolkit (nvcc + headers).
+  #   CUDA's RPMs install to /usr/local/cuda-XX.Y/. Bluefin's atomic FS
+  #   redirects /usr/local → /var/usrlocal, and /var content is stripped
+  #   on image commit. Files installed are physically gone from the image.
+  #
+  #   The base bluefin-dx-nvidia-open image already includes:
+  #     - NVIDIA open kernel driver + firmware + libs
+  #     - nvidia-container-toolkit (libnvidia-container, nvidia-ctk)
+  #     - nvidia-driver-cuda-libs (CUDA runtime / libcuda.so)
+  #     - nvidia-smi
+  #   …which is everything needed to RUN CUDA workloads.
+  #
+  #   For native nvcc/compilation work, the modern atomic-OS pattern is:
+  #     podman run --rm --device nvidia.com/gpu=all \
+  #       nvcr.io/nvidia/cuda:13.2-devel-fedora41 nvcc your_code.cu
+  #
+  #   Per-project CUDA version pinning, no host pollution, no atomic-FS fight.
+  #   See MAINTENANCE.md for the recommended workflow.
   # ---------------------------------------------------------------------------
-  # - type: rpm-ostree
-  #   repos:
-  #     - https://developer.download.nvidia.com/compute/cuda/repos/fedora%OS_VERSION%/x86_64/cuda-fedora%OS_VERSION%.repo
-  #   install:
-  #     - cuda-toolkit
-  #     - nvtop
+  - type: rpm-ostree
+    install:
+      - nvtop                 # live GPU monitoring (Fedora base)

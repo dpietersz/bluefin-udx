@@ -84,6 +84,10 @@ modules:
       # Zen Browser (Phase 3a) — community COPR, auto-rebuilt from upstream
       # Zen release binaries. Fallback: firminunderscore/zen-browser.
       - https://copr.fedorainfracloud.org/coprs/sneexy/zen-browser/repo/fedora-%OS_VERSION%/sneexy-zen-browser-fedora-%OS_VERSION%.repo
+      # Zed editor (Phase 3c) — no official vendor RPM. che/zed is the active
+      # community COPR (latest build 2026-05-15, supports fedora-44). Terra
+      # doesn't ship zed. Fallback: build from source via install script.
+      - https://copr.fedorainfracloud.org/coprs/che/zed/repo/fedora-%OS_VERSION%/che-zed-fedora-%OS_VERSION%.repo
       # Beekeeper Studio (Phase 3b) — NOT loaded from vendor URL because
       # the upstream .repo file at rpm.beekeeperstudio.io/beekeeper-studio.repo
       # points gpgkey= at a *signature file* (repomd.xml.asc) rather than a
@@ -121,8 +125,11 @@ modules:
       - browserpass-chromium    # Fedora base
       - zen-browser             # sneexy/zen-browser COPR
       - helium-browser-bin      # Terra (already enabled)
+      - zed                     # che/zed COPR — code editor
       # Phase 3b — vendor yum repos
       - beekeeper-studio        # rpm.beekeeperstudio.io vendor repo
+      # Phase 3c — Fedora base CLI essentials baked
+      - postgresql              # provides psql + client tools (Fedora base)
       # NOT baked (per user, out of scope for image):
       #   bruno      — ships only aarch64 RPM for Linux; x86_64 is .deb/.AppImage only
       #   localsend  — ships no RPM; .deb/.AppImage/.tar.gz only

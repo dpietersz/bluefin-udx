@@ -1,49 +1,125 @@
 # bluefin-udx
 
-Personal [Bluefin DX](https://docs.projectbluefin.io/) custom image, built with [BlueBuild](https://blue-build.org/). Two variants:
+> **U**ltra **D**eveloper e**X**perience — a highly opinionated personal layer on top of [Bluefin DX](https://projectbluefin.io/) by Dimitri Pietersz.
+>
+> *DX = Developer Experience.  UDX = Ultra Developer Experience.*
 
-- `ghcr.io/dpietersz/bluefin-udx:stable` — Intel/AMD (e.g. ThinkPad T580)
-- `ghcr.io/dpietersz/bluefin-udx-nvidia:stable` — NVIDIA open kernel modules (e.g. ThinkPad P14s Gen5 RTX)
+---
 
-## What this is
+## What this is (and isn't)
 
-A thin layer on top of `bluefin-dx` that bakes in:
+This is the [bootc](https://containers.github.io/bootc/) image I run as my **daily driver** on two Lenovo ThinkPads:
 
-- **Bootstrap-critical tooling** (`pass`, `gnupg2`, `age`, `openssh-clients`, `git`, `jq`, `curl`) so the [dotfiles](https://github.com/dpietersz/dotfiles) SSH/GPG/password-store decryption chain works on first boot of a fresh machine without any `rpm-ostree` layering from chezmoi.
-- **Microsoft Teams** (`teams-for-linux` from `repo.teamsforlinux.de`) with a Wayland integration patch — screen sharing works natively via the xdg-desktop-portal + PipeWire pipeline. The original motivator for splitting OS-level concerns out of chezmoi.
+- **T580** (Intel iGPU only) — runs `ghcr.io/dpietersz/bluefin-udx:stable`
+- **P14s Gen5 i7** (Intel + NVIDIA RTX) — runs `ghcr.io/dpietersz/bluefin-udx-nvidia:stable`
 
-Later phases (see [Plans](https://github.com/dpietersz/dotfiles/tree/main/Plans)) add system tools, GUI apps, Playwright system deps, and CUDA toolkit (NVIDIA variant only).
+It is **not** a community distro. It is **not** seeking users or contributors. It exists because:
 
-Full package manifest and rationale per package: see [`RECIPE.md`](./RECIPE.md).
+1. I love [Bluefin DX](https://docs.projectbluefin.io/) as a base.
+2. I have specific tools I want pre-installed and configured at the OS layer rather than layered per-machine via `rpm-ostree install`.
+3. I want a single source of truth for "what software belongs on the OS" so my two laptops stay identical with zero manual intervention.
 
-## Bootstrap order on a fresh machine
+If you find ideas here useful for your own custom Bluefin image, **fork freely**. Don't expect support, stable APIs, or any commitment to your use case. The package list reflects *my* daily work, not a thoughtful curation for anyone else.
 
+## Why split this out from dotfiles
+
+`chezmoi` is excellent for user-scope config (`.config/`, `.local/`, `~/Applications/` AppImages, brew, mise). It's a poor fit for system packages on an atomic OS:
+
+- `rpm-ostree install` requires `sudo` + a reboot to take effect — exactly what `chezmoi apply` shouldn't trigger.
+- Layered packages slow down every `rpm-ostree upgrade`.
+- Per-machine drift is invisible until something breaks differently on two laptops with "the same" dotfiles.
+
+Baking system packages into a custom bootc image fixes all three:
+
+- One nightly CI build → both laptops auto-pull → reboot when convenient.
+- Zero per-machine `rpm-ostree install` calls during `chezmoi apply`.
+- Atomic rollback (`sudo rpm-ostree rollback`) if a release breaks something.
+
+## What's baked
+
+See [`RECIPE.md`](./RECIPE.md) for the full package manifest with rationale per package and fallback plan if any upstream source dies. High level:
+
+- **Bootstrap** (so the dotfiles SSH/GPG/password-store chain works on first boot): `pass`, `gnupg2`, `age`, `openssh-clients`, `git`, `jq`, `curl`
+- **Niri Wayland WM stack**: `niri`, `waybar`, `swayosd`, `kanshi`, `swayidle`, `hyprlock` (fingerprint lockscreen), `mate-polkit`, `SwayNotificationCenter`, `pavucontrol`, `noctalia-shell-v5`
+- **Terminals + shell**: `kitty`, `tmux`, `nushell`
+- **GUI apps**: Microsoft Teams (with Wayland screen-share patch), Chromium + Browserpass, Zen Browser, Helium, Beekeeper Studio, Zed editor
+- **CLI essentials**: `postgresql` (client-only — `psql`, `pg_dump` etc.), `syncthing`, `blueman`, `espanso-wayland`
+- **NVIDIA variant only**: full CUDA toolkit + `nvtop`
+
+What's **not** baked (lives in [chezmoi dotfiles](https://github.com/dpietersz/dotfiles) or distrobox toolboxes):
+
+- All language tooling (node, go, python, bun, ...) — managed by `mise`
+- All CLI dev tools (bat, eza, fzf, ripgrep, neovim, starship, lazygit, ...) — managed by `mise`
+- macOS apps (Aerospace, Raycast, Granola, ...) — managed by Homebrew
+- `Obsidian`, `Polypane`, `Bruno`, `LocalSend`, `Microsoft Storage Explorer` — distrobox toolbox (companion repo: `udx-orbit`)
+
+## Using it on your own machine
+
+> **Warning**: You almost certainly don't want this. The package list is mine. Fork the repo and edit `recipes/common.yml` to your own taste before rebasing anything.
+
+If you've forked and edited:
+
+```bash
+# 1. Install vanilla Bluefin DX from a USB stick
+# 2. First boot, open a terminal, rebase:
+sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/<you>/<your-image>:stable
+sudo systemctl reboot
+
+# 3. After reboot, verify:
+rpm-ostree status     # booted image should be your fork
 ```
-1. Install vanilla Bluefin DX from USB
-2. sudo bootc switch ghcr.io/dpietersz/bluefin-udx:stable    # or -nvidia
-3. systemctl reboot
-   (now pass / gpg / age / ssh / git / jq / curl are on PATH)
-4. chezmoi init dpietersz/dotfiles
-5. chezmoi apply
-   - 08-decrypt-keys     prompts for passphrase, decrypts SSH+GPG
-   - 09-add-ssh-key       adds key to agent
-   - 10-clone-password    clones password-store
-   - 01-install-packages  runs mise install (pass is on PATH so GH token works)
-   - …all run_onchange_* scripts proceed normally
-```
 
-The image provides the **tools**. Secrets (the age-encrypted SSH/GPG keys, the
-password store) stay in the dotfiles repo and never touch this image.
+On Bluefin with `bootc` CLI present:
+
+```bash
+sudo bootc switch ghcr.io/<you>/<your-image>:stable
+```
 
 ## Daily updates
 
-Both variants are rebuilt nightly by GitHub Actions; `bootc upgrade && systemctl reboot` on each machine pulls the latest. Image signed with cosign — verification key is [`cosign.pub`](./cosign.pub).
+Images are rebuilt nightly by [GitHub Actions](.github/workflows/build.yml) at 04:20 UTC. Bluefin's `rpm-ostreed-automatic.timer` checks every 6 hours and stages updates; they apply on next reboot. Toggle the timer with `ujust toggle-updates`.
 
-## Local iteration
+So in practice: you reboot when you feel like it; you're always within 24 hours of the latest CI build.
+
+## Cosign verification
+
+Images are signed with `cosign`. Public key: [`cosign.pub`](./cosign.pub).
+
+To verify:
 
 ```bash
-./scripts/local-build-test.sh                  # build + smoke-test Intel variant
+cosign verify --key cosign.pub ghcr.io/dpietersz/bluefin-udx:stable
+```
+
+(Cosign-signed bootc rebase uses the `ostree-image-signed:` URL prefix with `/etc/pki/containers/` configured. Currently using `ostree-unverified-registry:` until I wire client-side verification end-to-end.)
+
+## Local iteration (for fork maintainers)
+
+Build + smoke-test a recipe locally without pushing to CI:
+
+```bash
+# Install bluebuild CLI from the official installer container
+mkdir -p ~/.local/bin
+CID=$(podman create ghcr.io/blue-build/cli:latest-installer /bin/true)
+podman cp "$CID:/out/bluebuild" ~/.local/bin/bluebuild
+podman rm "$CID"
+
+# Build + smoke-test
+./scripts/local-build-test.sh bluefin-udx
 ./scripts/local-build-test.sh bluefin-udx-nvidia
 ```
 
-See [`MAINTENANCE.md`](./MAINTENANCE.md) for the quarterly review checklist.
+CI runs the same smoke-boot gate after building; the image is only pushed to ghcr if all expected binaries and config files are present.
+
+## Maintenance
+
+See [`MAINTENANCE.md`](./MAINTENANCE.md) for the quarterly review checklist. Renovate watches the base image, GitHub Actions versions, and the third-party repos for drift; PRs land weekly on Monday morning.
+
+## Related repos
+
+- **[dpietersz/dotfiles](https://github.com/dpietersz/dotfiles)** — user-scope config (chezmoi-managed), runs on udx + macOS
+- **`udx-orbit`** — distrobox toolbox companion holding apps with no Fedora packaging (Obsidian, Polypane, Bruno, LocalSend, MS Storage Explorer) *(WIP — coming soon)*
+
+## License
+
+[MIT](./LICENSE). Recipes, scripts, and docs are mine to share. The packages they pull in have their own licenses, owned by their respective upstreams.
