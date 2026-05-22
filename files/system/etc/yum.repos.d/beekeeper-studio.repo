@@ -1,0 +1,10 @@
+[beekeeper-studio]
+name=Beekeeper Studio Repository
+baseurl=https://rpm.beekeeperstudio.io/repo/
+enabled=1
+gpgcheck=1
+# Upstream vendor's .repo file at https://rpm.beekeeperstudio.io/beekeeper-studio.repo
+# points gpgkey= at /repo/repodata/repomd.xml.asc which is a signature file,
+# not a key. rpm-ostree fails with "Public key not found" against that.
+# Ship a corrected file pointing at the actual GPG key.
+gpgkey=https://rpm.beekeeperstudio.io/beekeeper.key

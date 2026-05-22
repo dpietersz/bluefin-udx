@@ -82,6 +82,8 @@ $RUNNER run --rm --entrypoint /bin/bash "$IMAGE" -c '
     for p in chromium browserpass browserpass-chromium zen-browser helium-browser-bin; do
         check_rpm "$p"
     done
+    echo "Phase 3b GUI apps:"
+    check_rpm beekeeper-studio
 
     exit $FAIL
 '

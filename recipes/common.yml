@@ -84,6 +84,14 @@ modules:
       # Zen Browser (Phase 3a) — community COPR, auto-rebuilt from upstream
       # Zen release binaries. Fallback: firminunderscore/zen-browser.
       - https://copr.fedorainfracloud.org/coprs/sneexy/zen-browser/repo/fedora-%OS_VERSION%/sneexy-zen-browser-fedora-%OS_VERSION%.repo
+      # Beekeeper Studio (Phase 3b) — NOT loaded from vendor URL because
+      # the upstream .repo file at rpm.beekeeperstudio.io/beekeeper-studio.repo
+      # points gpgkey= at a *signature file* (repomd.xml.asc) rather than a
+      # public key, so rpm-ostree refuses with "Public key not found".
+      # Corrected .repo file is shipped via files/system/etc/yum.repos.d/.
+    keys:
+      # GPG key for Beekeeper Studio's vendor repo (Phase 3b).
+      - https://rpm.beekeeperstudio.io/beekeeper.key
     install:
       # Fedora base repos
       - kitty
@@ -113,5 +121,12 @@ modules:
       - browserpass-chromium    # Fedora base
       - zen-browser             # sneexy/zen-browser COPR
       - helium-browser-bin      # Terra (already enabled)
-      # obsidian — deferred to Phase 3b (alxhr0/Obsidian COPR went 404)
+      # Phase 3b — vendor yum repos
+      - beekeeper-studio        # rpm.beekeeperstudio.io vendor repo
+      # NOT baked (per user, out of scope for image):
+      #   bruno      — ships only aarch64 RPM for Linux; x86_64 is .deb/.AppImage only
+      #   localsend  — ships no RPM; .deb/.AppImage/.tar.gz only
+      #   polypane   — no RPM
+      #   obsidian   — alxhr0/Obsidian COPR dead; user prefers toolbox over baking
+      # All four live in user's distrobox toolbox setup (out of scope of this repo).
 
