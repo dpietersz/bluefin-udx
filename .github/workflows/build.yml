@@ -37,7 +37,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       # ----------------------------------------------------------------------
       # Build the image LOCALLY first (don't push). BlueBuild's build action
