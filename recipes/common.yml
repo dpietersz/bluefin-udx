@@ -22,6 +22,10 @@ modules:
       # via PipeWire portal — the whole reason this repo exists).
       # See: https://github.com/IsmaelMartinez/teams-for-linux
       - https://repo.teamsforlinux.de/rpm/teams-for-linux.repo
+    keys:
+      # GPG key for the teams-for-linux RPM repo. Without this, rpm-ostree
+      # refuses the package: "could not be verified".
+      - https://repo.teamsforlinux.de/teams-for-linux.asc
     install:
       # bootstrap-critical: dotfiles assumes these are present at first apply
       - pass
