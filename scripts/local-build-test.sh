@@ -24,11 +24,18 @@ if ! command -v bluebuild >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "==> Building $RECIPE locally..."
-bluebuild build --local "$RECIPE_FILE"
+echo "==> Building $RECIPE locally (no push, no sign)..."
+BB_BUILD_PUSH=false bluebuild build --no-sign "$RECIPE_FILE"
 
-# bluebuild build --local writes to localhost/<name>:latest
-IMAGE="localhost/${RECIPE}:latest"
+# bluebuild writes to localhost/<name>:<tag>. Find the most recent.
+IMAGE=$(podman images --format "{{.Repository}}:{{.Tag}}" \
+    | grep "^localhost/${RECIPE}:" \
+    | head -n1)
+if [ -z "$IMAGE" ]; then
+    echo "ERROR: no localhost/${RECIPE}:* image in podman store after build"
+    podman images
+    exit 1
+fi
 
 echo
 echo "==> Smoke-boot test against $IMAGE"
