@@ -142,6 +142,8 @@ jobs:
             check_rpm zed
             check_rpm postgresql
             check_bin psql
+            check_rpm wtype
+            check_bin wtype
             # NVIDIA variant adds nvtop. CUDA toolkit not baked — use
             # nvidia/cuda containers per project (atomic /usr/local quirk).
             if [ "${{ matrix.recipe }}" = "bluefin-udx-nvidia" ]; then

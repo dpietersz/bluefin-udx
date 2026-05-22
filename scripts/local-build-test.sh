@@ -88,6 +88,8 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     check_rpm zed
     check_rpm postgresql
     check_bin psql
+    check_rpm wtype
+    check_bin wtype
 
     # NVIDIA variant adds nvtop. CUDA toolkit intentionally not baked —
     # incompatible with atomic /usr/local redirect; use nvidia/cuda containers

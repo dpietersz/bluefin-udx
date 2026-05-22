@@ -130,6 +130,7 @@ modules:
       - beekeeper-studio        # rpm.beekeeperstudio.io vendor repo
       # Phase 3c — Fedora base CLI essentials baked
       - postgresql              # provides psql + client tools (Fedora base)
+      - wtype                   # Wayland keyboard input helper (Fedora base)
       # NOT baked (per user, out of scope for image):
       #   bruno      — ships only aarch64 RPM for Linux; x86_64 is .deb/.AppImage only
       #   localsend  — ships no RPM; .deb/.AppImage/.tar.gz only
