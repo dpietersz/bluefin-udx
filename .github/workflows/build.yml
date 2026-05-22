@@ -116,7 +116,7 @@ jobs:
       - name: Lowercase registry path
         id: registry_case
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: ASzc/change-string-case-action@v6
+        uses: ASzc/change-string-case-action@v8
         with:
           string: ${{ env.IMAGE_REGISTRY }}
 
