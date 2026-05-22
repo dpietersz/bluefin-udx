@@ -40,9 +40,13 @@ TMP=$(mktemp)
 trap 'rm -f "$TMP"' EXIT
 
 # Idempotent merge: set transports.docker["ghcr.io/dpietersz"] to a single
-# sigstoreSigned entry keyed against our pubkey. matchRepoDigestOrExact lets
-# the signature cover any tag/digest within the dpietersz namespace as long
-# as cosign signed that exact digest.
+# sigstoreSigned entry keyed against our pubkey. matchRepository (instead of
+# matchRepoDigestOrExact) is the right rule for tag-based rebases: cosign
+# signs the image by digest reference, so the signature payload's
+# docker-reference is `repo` without a tag — `matchRepoDigestOrExact`
+# rejects `repo:stable` pulls against that. matchRepository requires only
+# the repo namespace to match, which is what upstream Bluefin/ublue uses
+# for their own ghcr.io/ublue-os entry.
 jq \
     --arg reg "$REGISTRY" \
     --arg key "$KEY" \
@@ -50,7 +54,7 @@ jq \
         {
             "type": "sigstoreSigned",
             "keyPath": $key,
-            "signedIdentity": { "type": "matchRepoDigestOrExact" }
+            "signedIdentity": { "type": "matchRepository" }
         }
     ]' \
     "$POLICY" > "$TMP"
