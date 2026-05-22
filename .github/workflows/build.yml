@@ -47,24 +47,22 @@ jobs:
 
       # ----------------------------------------------------------------------
       # Install bluebuild CLI directly so we can drive build/push as separate
-      # steps and insert a smoke-boot gate between them. We pull the official
-      # installer container, extract the binary, drop it on PATH.
+      # steps and insert a smoke-boot gate between them.
       # ----------------------------------------------------------------------
       - name: Install bluebuild CLI
         run: |
           set -euo pipefail
           INSTALLER_IMG="ghcr.io/blue-build/cli:latest-installer"
-          CID=$(podman create "$INSTALLER_IMG" /bin/true)
-          podman cp "$CID:/out/bluebuild" /usr/local/bin/bluebuild
-          podman rm "$CID" >/dev/null
+          CID=$(docker create "$INSTALLER_IMG" /bin/true)
+          docker cp "$CID:/out/bluebuild" /usr/local/bin/bluebuild
+          docker rm "$CID" >/dev/null
           chmod +x /usr/local/bin/bluebuild
           bluebuild --version
 
       # ----------------------------------------------------------------------
-      # BUILD LOCALLY — no push, no sign.
-      # bluebuild build with BB_BUILD_PUSH=false leaves the image in the local
-      # podman store as `localhost/<recipe>:<tag>`. --no-sign skips cosign so
-      # we can sign manually after the smoke gate passes.
+      # BUILD LOCALLY — no push, no sign. Use docker driver since the runner
+      # already has a docker daemon; smoke + push all use docker, so storage
+      # stays consistent.
       # ----------------------------------------------------------------------
       - name: Build (local, no push)
         env:
@@ -73,37 +71,28 @@ jobs:
           CLICOLOR_FORCE: "1"
         run: |
           set -euo pipefail
-          # Force podman driver. ubuntu-24.04 runners ship a docker daemon,
-          # which bluebuild auto-prefers — but the rest of this workflow
-          # (smoke run, tag, push) uses podman, so storage must match.
-          bluebuild build --no-sign --build-driver buildah "recipes/${{ matrix.recipe }}.yml"
-          echo "Images in local podman store after build:"
-          podman images --format "{{.Repository}}:{{.Tag}}"
+          bluebuild build --no-sign --build-driver docker "recipes/${{ matrix.recipe }}.yml"
+          echo "Images in local docker store after build:"
+          docker images --format "{{.Repository}}:{{.Tag}}" | head -20
 
       # ----------------------------------------------------------------------
       # SMOKE-BOOT GATE.
-      # The image is in the local podman store. Boot it and verify expected
-      # binaries + config files. If anything is missing, fail here — never
-      # touches ghcr, no laptop pulls a broken image.
+      # Boot the just-built image, verify expected binaries + config files.
       # ----------------------------------------------------------------------
       - name: Smoke-boot test
         id: smoke
         run: |
           set -euo pipefail
-          # bluebuild names images `localhost/<recipe>:<tag>` — find the most
-          # recent tag for this recipe.
-          IMAGE=$(podman images --format "{{.Repository}}:{{.Tag}}" \
-            | grep "^localhost/${{ matrix.recipe }}:" \
-            | head -n1)
-          if [ -z "$IMAGE" ]; then
-            echo "FAIL: no localhost/${{ matrix.recipe }}:* image in podman store"
-            podman images
+          IMAGE="localhost/${{ matrix.recipe }}:latest"
+          if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "FAIL: $IMAGE not in docker store"
+            docker images
             exit 1
           fi
           echo "Smoke-testing $IMAGE"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
-          podman run --rm --entrypoint /bin/bash "$IMAGE" -c '
+          docker run --rm --entrypoint /bin/bash "$IMAGE" -c '
             set -e
             FAIL=0
             check_bin() {
@@ -159,13 +148,13 @@ jobs:
           # Always push :stable + a dated tag + a sha tag (rollback targets).
           for TAG in stable "$DATE_TAG" "$SHA_TAG"; do
             DEST="${REG}/${NAME}:${TAG}"
-            podman tag "$SRC" "$DEST"
-            podman push "$DEST"
+            docker tag "$SRC" "$DEST"
+            docker push "$DEST"
             echo "pushed $DEST"
           done
 
           # Capture the digest of the :stable tag for cosign signing.
-          DIGEST=$(podman inspect "${REG}/${NAME}:stable" --format '{{index .RepoDigests 0}}' | sed 's/.*@//')
+          DIGEST=$(docker inspect "${REG}/${NAME}:stable" --format '{{index .RepoDigests 0}}' | sed 's/.*@//')
           echo "image_ref=${REG}/${NAME}@${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "Will sign: ${REG}/${NAME}@${DIGEST}"
 
