@@ -77,6 +77,13 @@ modules:
       # swayosd (Phase 2.5) — OSD for volume/brightness/caps-lock under niri,
       # part of the WM stack per AGENTS.md.
       - https://copr.fedorainfracloud.org/coprs/celestelove/SwayOSD/repo/fedora-%OS_VERSION%/celestelove-SwayOSD-fedora-%OS_VERSION%.repo
+      # NOTE: Obsidian deferred to Phase 3b — alxhr0/Obsidian COPR was 404 as
+      # of 2026-05-22 (GPG pubkey URL returns 404). Will install via AppImage
+      # extract in Phase 3b alongside Polypane.
+      #
+      # Zen Browser (Phase 3a) — community COPR, auto-rebuilt from upstream
+      # Zen release binaries. Fallback: firminunderscore/zen-browser.
+      - https://copr.fedorainfracloud.org/coprs/sneexy/zen-browser/repo/fedora-%OS_VERSION%/sneexy-zen-browser-fedora-%OS_VERSION%.repo
     install:
       # Fedora base repos
       - kitty
@@ -100,4 +107,11 @@ modules:
       # Phase 2.5 COPRs
       - nushell
       - swayosd
+      # Phase 3a — GUI apps, all native repo-based (no AppImage extract here)
+      - chromium                # Fedora base
+      - browserpass             # Fedora base — pass integration for browsers
+      - browserpass-chromium    # Fedora base
+      - zen-browser             # sneexy/zen-browser COPR
+      - helium-browser-bin      # Terra (already enabled)
+      # obsidian — deferred to Phase 3b (alxhr0/Obsidian COPR went 404)
 

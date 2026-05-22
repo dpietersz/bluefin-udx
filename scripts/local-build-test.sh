@@ -78,6 +78,10 @@ $RUNNER run --rm --entrypoint /bin/bash "$IMAGE" -c '
              niri waybar pavucontrol NetworkManager-tui blueman SwayNotificationCenter \
              espanso-wayland hyprlock noctalia-shell-v5 \
              nushell swayosd; do check_rpm "$p"; done
+    echo "Phase 3a GUI apps:"
+    for p in chromium browserpass browserpass-chromium zen-browser helium-browser-bin; do
+        check_rpm "$p"
+    done
 
     exit $FAIL
 '
