@@ -10,3 +10,4 @@ cosign.password
 
 # Local podman/buildah scratch
 .buildah/
+/.bluebuild-scripts_*

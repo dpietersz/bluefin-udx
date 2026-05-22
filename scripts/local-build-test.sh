@@ -27,43 +27,51 @@ fi
 echo "==> Building $RECIPE locally (no push, no sign)..."
 BB_BUILD_PUSH=false bluebuild build --no-sign "$RECIPE_FILE"
 
-# bluebuild writes to localhost/<name>:<tag>. Find the most recent.
-IMAGE=$(podman images --format "{{.Repository}}:{{.Tag}}" \
-    | grep "^localhost/${RECIPE}:" \
-    | head -n1)
-if [ -z "$IMAGE" ]; then
-    echo "ERROR: no localhost/${RECIPE}:* image in podman store after build"
-    podman images
+# bluebuild may pick the docker driver if a docker daemon is present, so the
+# image can land in either store. Look in both.
+IMAGE="localhost/${RECIPE}:latest"
+if podman image exists "$IMAGE" 2>/dev/null; then
+    RUNNER=podman
+elif command -v docker >/dev/null && docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    RUNNER=docker
+else
+    echo "ERROR: $IMAGE not found in podman or docker storage"
+    podman images 2>&1 | head -5
+    docker images 2>&1 | head -5
     exit 1
 fi
+echo "==> Build done, image $IMAGE found in $RUNNER"
 
 echo
-echo "==> Smoke-boot test against $IMAGE"
-# Single podman run that exits non-zero if any expected binary is missing.
-# Keep this list aligned with what each phase adds. Phase 0 = bootstrap pkgs + Teams.
-podman run --rm --entrypoint /bin/bash "$IMAGE" -c '
+echo "==> Smoke-boot test against $IMAGE (via $RUNNER)"
+
+# Notes on the checks below:
+#  - PATH-resident binaries (pass, gpg, …) check via `command -v`.
+#  - Bluefin redirects /opt -> /var/opt (writeable, first-boot populated from
+#    /usr/lib/opt). Inside a `run` container /var/opt is empty so the
+#    /usr/bin/teams-for-linux symlink chain dead-ends. Verify the rpm is
+#    installed AND the wrapped binary lives at its real /usr/lib/opt path.
+$RUNNER run --rm --entrypoint /bin/bash "$IMAGE" -c '
     set -e
     FAIL=0
-    check() {
-        if command -v "$1" >/dev/null 2>&1; then
-            echo "  ok    $1"
-        else
-            echo "  MISS  $1"
-            FAIL=1
-        fi
+    check_bin() {
+        if command -v "$1" >/dev/null 2>&1; then echo "  ok    $1"; else echo "  MISS  $1"; FAIL=1; fi
     }
-    echo "Phase 0 binaries:"
-    for bin in pass gpg age ssh git jq curl teams-for-linux; do
-        check "$bin"
-    done
+    check_file() {
+        if [ -e "$1" ]; then echo "  ok    $1"; else echo "  MISS  $1"; FAIL=1; fi
+    }
+    check_rpm() {
+        if rpm -q "$1" >/dev/null 2>&1; then echo "  ok    rpm $1"; else echo "  MISS  rpm $1"; FAIL=1; fi
+    }
 
-    # Verify Teams wrapper actually got installed (file at /etc/teams-for-linux/config.json.default).
-    if [ -f /etc/teams-for-linux/config.json.default ]; then
-        echo "  ok    Teams config.json.default seeded"
-    else
-        echo "  MISS  Teams config.json.default seed"
-        FAIL=1
-    fi
+    echo "Phase 0 bootstrap binaries:"
+    for bin in pass gpg age ssh git jq curl; do check_bin "$bin"; done
+
+    echo "Phase 0 Teams (in /opt, first-boot reflected — check rpm + real path):"
+    check_rpm teams-for-linux
+    check_file /usr/lib/opt/teams-for-linux/teams-for-linux
+    check_file /usr/lib/opt/teams-for-linux/teams-for-linux.real   # wrapper proof
+    check_file /etc/teams-for-linux/config.json.default
 
     exit $FAIL
 '

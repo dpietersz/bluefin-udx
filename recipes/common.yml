@@ -46,5 +46,5 @@ modules:
   # browser-toolbox.sh (battle-tested logic — don't re-derive).
   # ---------------------------------------------------------------------------
   - type: script
-    snippets:
-      - "/ctx/scripts/teams-wayland-patch.sh"
+    scripts:
+      - teams-wayland-patch.sh
