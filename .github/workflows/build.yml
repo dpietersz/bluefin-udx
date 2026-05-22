@@ -1,0 +1,159 @@
+name: build
+
+on:
+  # Daily rebuild picks up upstream Bluefin-DX bumps + vendor RPM updates.
+  schedule:
+    - cron: "20 4 * * *"   # 04:20 UTC daily
+  # Build every push to main (and PR previews — no push to ghcr on PRs).
+  push:
+    branches: [main]
+    paths:
+      - "recipes/**"
+      - "scripts/**"
+      - "files/**"
+      - ".github/workflows/build.yml"
+  pull_request:
+    branches: [main]
+  # Allow manual triggers from the Actions UI.
+  workflow_dispatch:
+
+env:
+  IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.recipe }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe:
+          - bluefin-udx
+          - bluefin-udx-nvidia
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # ----------------------------------------------------------------------
+      # Build the image LOCALLY first (don't push). BlueBuild's build action
+      # writes the image into the local podman/buildah store so the smoke-boot
+      # gate can run against it before it ever reaches ghcr.
+      # ----------------------------------------------------------------------
+      - name: Build image (local only — no push yet)
+        uses: blue-build/github-action@v1.8
+        id: build_local
+        with:
+          recipe: ${{ matrix.recipe }}.yml
+          registry_token: ${{ github.token }}
+          pr_event_number: ${{ github.event.number }}
+          maximize_build_space: true
+          # Critical: do NOT push here. We push only after smoke-boot passes.
+          # BlueBuild's action handles this via the `should_push` knob — when
+          # false, the image stays in the local store as `localhost/<recipe>:<tag>`.
+          # NOTE: confirm flag name against bluebuild action docs at promotion
+          # time; if the action has changed its API, swap to manual buildah+push.
+          should_push: false
+
+      # ----------------------------------------------------------------------
+      # SMOKE-BOOT GATE.
+      # Run the locally-built image and verify all packages we expect to be
+      # present actually are. If anything's missing (COPR returned empty,
+      # vendor repo dropped a dep, Containerfile change had a typo) we fail
+      # the job here — image never reaches ghcr, no laptop pulls it.
+      # ----------------------------------------------------------------------
+      - name: Smoke-boot test
+        run: |
+          set -euo pipefail
+          IMAGE="localhost/${{ matrix.recipe }}:latest"
+
+          # Sanity: the image must exist in the local store.
+          if ! podman image exists "$IMAGE"; then
+            echo "FAIL: $IMAGE not in local podman store after build"
+            podman images
+            exit 1
+          fi
+
+          podman run --rm --entrypoint /bin/bash "$IMAGE" -c '
+            set -e
+            FAIL=0
+            check() {
+                if command -v "$1" >/dev/null 2>&1; then
+                    echo "  ok    $1"
+                else
+                    echo "  MISS  $1"
+                    FAIL=1
+                fi
+            }
+            echo "Phase 0 binaries:"
+            for bin in pass gpg age ssh git jq curl teams-for-linux; do
+                check "$bin"
+            done
+            if [ -f /etc/teams-for-linux/config.json.default ]; then
+                echo "  ok    Teams config.json.default seeded"
+            else
+                echo "  MISS  Teams config.json.default seed"
+                FAIL=1
+            fi
+            exit $FAIL
+          '
+
+      # ----------------------------------------------------------------------
+      # Push to ghcr (only on main, only after smoke-boot passed, never on PR).
+      # ----------------------------------------------------------------------
+      - name: Log in to ghcr
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase registry path
+        id: registry_case
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: ASzc/change-string-case-action@v6
+        with:
+          string: ${{ env.IMAGE_REGISTRY }}
+
+      - name: Push to ghcr
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        id: push
+        run: |
+          set -euo pipefail
+          REG="${{ steps.registry_case.outputs.lowercase }}"
+          IMAGE="${{ matrix.recipe }}"
+          SRC="localhost/${IMAGE}:latest"
+          DATE_TAG="$(date -u +%Y%m%d)"
+          SHA_TAG="${GITHUB_SHA::7}"
+          for TAG in stable "$DATE_TAG" "$SHA_TAG"; do
+            podman tag "$SRC" "${REG}/${IMAGE}:${TAG}"
+            podman push "${REG}/${IMAGE}:${TAG}"
+          done
+          # Output digest for cosign signing step.
+          DIGEST=$(podman inspect "${REG}/${IMAGE}:stable" --format '{{.Digest}}')
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "image_ref=${REG}/${IMAGE}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: sigstore/cosign-installer@v3.10.0
+
+      - name: Sign image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          COSIGN_PASSWORD: ""
+          IMAGE_REF: ${{ steps.push.outputs.image_ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COSIGN_PRIVATE_KEY}" ]; then
+            echo "WARN: SIGNING_SECRET not set. Image pushed but unsigned."
+            echo "      Generate a keypair (see README) and add SIGNING_SECRET + commit cosign.pub."
+            exit 0
+          fi
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${IMAGE_REF}"

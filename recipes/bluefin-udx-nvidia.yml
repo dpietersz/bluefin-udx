@@ -1,0 +1,31 @@
+# bluefin-udx-nvidia — NVIDIA variant (open kernel modules)
+# Use on machines with an NVIDIA GPU (e.g. ThinkPad P14s Gen5 with RTX).
+# Base: Bluefin DX stable + NVIDIA open kernel modules. "Open" is the modern
+# recommendation for Turing+ cards and supports full CUDA.
+#
+# Phase 0: same package set as the Intel variant. Phase 4 will add cuda-toolkit
+# + nvtop here only (kept out of common.yml to keep the Intel image lean).
+
+name: bluefin-udx-nvidia
+description: Personal Bluefin DX custom image with NVIDIA open drivers
+base-image: ghcr.io/ublue-os/bluefin-dx-nvidia-open
+image-version: stable
+
+modules:
+  - type: files
+    files:
+      - source: system
+        destination: /
+  - from-file: common.yml
+
+  # ---------------------------------------------------------------------------
+  # Phase 4 placeholder — NVIDIA-only additions (cuda-toolkit, nvtop).
+  # Intentionally commented out until Phase 4 cutover; uncomment per
+  # /var/home/pietersz/dotfiles/Plans/* migration plan.
+  # ---------------------------------------------------------------------------
+  # - type: rpm-ostree
+  #   repos:
+  #     - https://developer.download.nvidia.com/compute/cuda/repos/fedora%OS_VERSION%/x86_64/cuda-fedora%OS_VERSION%.repo
+  #   install:
+  #     - cuda-toolkit
+  #     - nvtop

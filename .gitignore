@@ -1,0 +1,12 @@
+# BlueBuild local builds
+output/
+*.tar
+*.tar.gz
+
+# Cosign private key — NEVER commit. Lives only in GH Actions secret SIGNING_SECRET.
+cosign.key
+cosign.password
+*.pem
+
+# Local podman/buildah scratch
+.buildah/

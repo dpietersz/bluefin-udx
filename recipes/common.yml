@@ -1,0 +1,46 @@
+# bluefin-udx — shared module set
+# Included by recipes/bluefin-udx.yml and recipes/bluefin-udx-nvidia.yml.
+# Phase 0 scope: only bootstrap-critical packages + Microsoft Teams.
+# Later phases will add system tools (Phase 2), GUI apps (Phase 3), and
+# Playwright system deps (Phase 3.5). See RECIPE.md for the package manifest.
+
+modules:
+  # ---------------------------------------------------------------------------
+  # Bootstrap-critical packages.
+  # These guarantee the dotfiles SSH/GPG/password-store decryption chain works
+  # on first boot of a fresh machine, without requiring rpm-ostree layering from
+  # chezmoi. Order of operations on a fresh machine:
+  #   1. Install vanilla Bluefin DX from USB
+  #   2. sudo bootc switch ghcr.io/dpietersz/bluefin-udx[-nvidia]:stable
+  #   3. reboot
+  #   4. chezmoi apply  (decrypts keys, clones password-store — all binaries below
+  #                     are already on PATH, no rpm-ostree calls needed)
+  # ---------------------------------------------------------------------------
+  - type: rpm-ostree
+    repos:
+      # Microsoft Teams (unofficial maintained client, supports Wayland screen share
+      # via PipeWire portal — the whole reason this repo exists).
+      # See: https://github.com/IsmaelMartinez/teams-for-linux
+      - https://repo.teamsforlinux.de/rpm/teams-for-linux.repo
+    install:
+      # bootstrap-critical: dotfiles assumes these are present at first apply
+      - pass
+      - gnupg2
+      - age
+      - openssh-clients
+      - git
+      - jq
+      - curl
+      # GUI app — bake reason: screen sharing reliability on Wayland; distrobox
+      # path was unreliable. See RECIPE.md.
+      - teams-for-linux
+
+  # ---------------------------------------------------------------------------
+  # Teams Wayland integration patch.
+  # Rewrites the upstream .desktop Exec line to enable PipeWire screen capture
+  # and seeds a default config on first launch. Ported verbatim from boxkit
+  # browser-toolbox.sh (battle-tested logic — don't re-derive).
+  # ---------------------------------------------------------------------------
+  - type: script
+    snippets:
+      - "/ctx/scripts/teams-wayland-patch.sh"

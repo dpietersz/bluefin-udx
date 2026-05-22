@@ -1,0 +1,35 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard"
+  ],
+  "labels": ["dependencies"],
+  "schedule": ["before 6am on monday"],
+  "packageRules": [
+    {
+      "description": "Group Bluefin base image bumps together",
+      "matchPackageNames": [
+        "ghcr.io/ublue-os/bluefin-dx",
+        "ghcr.io/ublue-os/bluefin-dx-nvidia-open"
+      ],
+      "groupName": "bluefin base images"
+    },
+    {
+      "description": "GitHub Actions stay current",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track base-image tag bumps in recipe YAMLs",
+      "fileMatch": ["^recipes/.*\\.ya?ml$"],
+      "matchStrings": [
+        "base-image:\\s*(?<depName>[^\\s]+)\\s*\\nimage-version:\\s*(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ]
+}

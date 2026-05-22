@@ -1,0 +1,18 @@
+# bluefin-udx — Intel/AMD variant (no NVIDIA)
+# Use on machines without an NVIDIA GPU (e.g. ThinkPad T580).
+# Base: Bluefin DX stable. Equivalent to "vanilla bluefin + ujust dx-enable" but
+# baked into the image, removing one layer of rpm-ostree drift.
+
+name: bluefin-udx
+description: Personal Bluefin DX custom image (Intel/AMD variant)
+base-image: ghcr.io/ublue-os/bluefin-dx
+image-version: stable
+
+# Modules are merged from common.yml so both variants stay in lockstep.
+# Phase 0: only bootstrap pkgs + Teams. Later phases extend common.yml.
+modules:
+  - type: files
+    files:
+      - source: system
+        destination: /
+  - from-file: common.yml

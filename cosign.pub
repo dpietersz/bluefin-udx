@@ -1,0 +1,7 @@
+-----BEGIN PUBLIC KEY-----
+PLACEHOLDER — generate with:
+  cosign generate-key-pair
+then commit the resulting cosign.pub here and add the private key (cosign.key
+contents) as a GitHub Actions secret named SIGNING_SECRET.
+DO NOT commit cosign.key — it is in .gitignore for safety.
+-----END PUBLIC KEY-----
