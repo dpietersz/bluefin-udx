@@ -45,7 +45,7 @@ jobs:
       # gate can run against it before it ever reaches ghcr.
       # ----------------------------------------------------------------------
       - name: Build image (local only — no push yet)
-        uses: blue-build/github-action@v1.8
+        uses: blue-build/github-action@v1.11
         id: build_local
         with:
           recipe: ${{ matrix.recipe }}.yml
