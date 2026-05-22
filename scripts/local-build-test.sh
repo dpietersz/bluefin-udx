@@ -74,9 +74,10 @@ $RUNNER run --rm --entrypoint /bin/bash "$IMAGE" -c '
     check_file /etc/teams-for-linux/config.json.default
 
     echo "Phase 2 system packages:"
-    for p in kitty tmux mate-polkit syncthing swayidle \
+    for p in kitty tmux kanshi mate-polkit syncthing swayidle \
              niri waybar pavucontrol NetworkManager-tui blueman SwayNotificationCenter \
-             espanso-wayland hyprlock noctalia-shell-v5; do check_rpm "$p"; done
+             espanso-wayland hyprlock noctalia-shell-v5 \
+             nushell swayosd; do check_rpm "$p"; done
 
     exit $FAIL
 '

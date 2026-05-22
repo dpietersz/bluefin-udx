@@ -69,12 +69,19 @@ modules:
       - https://copr.fedorainfracloud.org/coprs/yalter/niri/repo/fedora-%OS_VERSION%/yalter-niri-fedora-%OS_VERSION%.repo
       # noctalia-shell-v5
       - https://copr.fedorainfracloud.org/coprs/lionheartp/Hyprland/repo/fedora-%OS_VERSION%/lionheartp-Hyprland-fedora-%OS_VERSION%.repo
+      # nushell (Phase 2.5) — replaces the Homebrew-managed nushell as the
+      # system shell. Shells are system-integration-sensitive (PAM,
+      # /etc/shells, terminal launcher) and brew-managed paths are awkward
+      # for default shells, so we bake.
+      - https://copr.fedorainfracloud.org/coprs/atim/nushell/repo/fedora-%OS_VERSION%/atim-nushell-fedora-%OS_VERSION%.repo
+      # swayosd (Phase 2.5) — OSD for volume/brightness/caps-lock under niri,
+      # part of the WM stack per AGENTS.md.
+      - https://copr.fedorainfracloud.org/coprs/celestelove/SwayOSD/repo/fedora-%OS_VERSION%/celestelove-SwayOSD-fedora-%OS_VERSION%.repo
     install:
       # Fedora base repos
       - kitty
       - tmux
-      # nushell intentionally NOT baked — installed via Homebrew on both
-      # macOS and Linux (single cross-platform source of truth).
+      - kanshi              # Phase 2.5 — Wayland output config daemon for niri
       - mate-polkit
       - syncthing
       - swayidle
@@ -90,4 +97,7 @@ modules:
       - hyprlock
       # lionheartp/Hyprland COPR
       - noctalia-shell-v5
+      # Phase 2.5 COPRs
+      - nushell
+      - swayosd
 
