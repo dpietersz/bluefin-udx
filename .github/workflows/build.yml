@@ -73,8 +73,11 @@ jobs:
           CLICOLOR_FORCE: "1"
         run: |
           set -euo pipefail
-          bluebuild build --no-sign "recipes/${{ matrix.recipe }}.yml"
-          echo "Images in local store after build:"
+          # Force podman driver. ubuntu-24.04 runners ship a docker daemon,
+          # which bluebuild auto-prefers — but the rest of this workflow
+          # (smoke run, tag, push) uses podman, so storage must match.
+          bluebuild build --no-sign --build-driver buildah "recipes/${{ matrix.recipe }}.yml"
+          echo "Images in local podman store after build:"
           podman images --format "{{.Repository}}:{{.Tag}}"
 
       # ----------------------------------------------------------------------
