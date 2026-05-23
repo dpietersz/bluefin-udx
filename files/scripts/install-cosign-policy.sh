@@ -9,7 +9,7 @@
 #   Merging with jq keeps us forward-compatible.
 #
 # Pairs with:
-#   /usr/lib/pki/containers/bluefin-udx-nvidia.pub      (the cosign pubkey)
+#   /usr/lib/pki/containers/bluefin-udx.pub      (the cosign pubkey)
 #   /etc/containers/registries.d/dpietersz.yaml         (sigstore attachments)
 #
 # After this lands in the image, clients can rebase via:
@@ -18,7 +18,7 @@
 set -euo pipefail
 
 POLICY=/etc/containers/policy.json
-KEY=/usr/lib/pki/containers/bluefin-udx-nvidia.pub
+KEY=/usr/lib/pki/containers/bluefin-udx.pub
 REGISTRY="ghcr.io/dpietersz"
 
 if [ ! -f "$POLICY" ]; then
