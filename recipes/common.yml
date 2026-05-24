@@ -158,6 +158,13 @@ modules:
       # Phase 3c — Fedora base CLI essentials baked
       - postgresql              # provides psql + client tools (Fedora base)
       - wtype                   # Wayland keyboard input helper (Fedora base)
+      # Screenshot stack — required for the niri keybind that pipes a region
+      # capture into satty (annotation tool, user-scope via dotfiles GH release).
+      # grim/slurp are stable Fedora-base tooling needed by every Wayland
+      # screenshot pipeline, so they bake; satty is the polish layer and lives
+      # in dotfiles. See RECIPE.md.
+      - grim                    # Wayland screenshot capture (Fedora base)
+      - slurp                   # Wayland region selector (Fedora base)
       # NOT baked (per user, out of scope for image):
       #   bruno      — ships only aarch64 RPM for Linux; x86_64 is .deb/.AppImage only
       #   localsend  — ships no RPM; .deb/.AppImage/.tar.gz only
