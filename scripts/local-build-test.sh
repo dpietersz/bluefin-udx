@@ -77,8 +77,16 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     for p in kitty tmux kanshi mate-polkit syncthing swayidle \
              niri waybar pavucontrol NetworkManager-tui blueman SwayNotificationCenter \
              espanso-wayland hyprlock noctalia-shell-v5 \
-             nushell swayosd nwg-displays; do check_rpm "$p"; done
+             nushell swayosd; do check_rpm "$p"; done
+    # nwg-displays — installed from upstream tarball (not RPM-backed).
+    # Verify the binary exists AND the installed source has niri detection
+    # (NIRI_SOCKET env-var check) so a regression back to a pre-0.4 build fails fast.
     check_bin nwg-displays
+    if ! grep -q NIRI_SOCKET /usr/lib/python3.*/site-packages/nwg_displays/main.py 2>/dev/null; then
+        echo "  FAIL: nwg-displays installed but missing NIRI_SOCKET detection (pre-0.4)"
+        exit 1
+    fi
+    echo "  ok    nwg-displays (niri-aware)"
     echo "Phase 3a GUI apps:"
     for p in chromium browserpass browserpass-chromium zen-browser helium-browser-bin; do
         check_rpm "$p"

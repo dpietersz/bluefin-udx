@@ -15,7 +15,9 @@ For each COPR baked into `common.yml`, check it received at least one build in t
 - [ ] `sneexy/zen-browser` — https://copr.fedorainfracloud.org/coprs/sneexy/zen-browser/builds/
 - [ ] `cosmicfusion/Obsidian` (Phase 3) — https://copr.fedorainfracloud.org/coprs/cosmicfusion/Obsidian/builds/
 - [ ] `lionheartp/Hyprland` (Phase 2, for noctalia-shell-v5) — https://copr.fedorainfracloud.org/coprs/lionheartp/Hyprland/builds/
-- [ ] `tofik/nwg-shell` (Phase 2.5, for nwg-displays) — https://copr.fedorainfracloud.org/coprs/tofik/nwg-shell/builds/ — single-maintainer; fallback is upstream `install.sh` from https://github.com/nwg-piotr/nwg-displays
+
+**Upstream GitHub tarball installs (verify each quarter that the install path still works):**
+- [ ] `nwg-displays` — https://github.com/nwg-piotr/nwg-displays/tags — confirm latest tag still ships an `install.sh` that writes to `/usr/bin`, `/usr/lib/pythonX.Y/site-packages`, and `/usr/share` only. If upstream changes layout, update `files/scripts/install-nwg-displays-latest.sh`. Re-check whether `tofik/nwg-shell` COPR has caught up to ≥ 0.4.x — if so, switch back to the COPR (simpler).
 
 If any COPR has gone dormant (> 90 days without a build) and upstream has released a new version, switch to the documented fallback (see RECIPE.md "Fallback if source dies" column).
 
