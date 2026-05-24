@@ -104,6 +104,11 @@ modules:
       # swayosd (Phase 2.5) — OSD for volume/brightness/caps-lock under niri,
       # part of the WM stack per AGENTS.md.
       - https://copr.fedorainfracloud.org/coprs/celestelove/SwayOSD/repo/fedora-%OS_VERSION%/celestelove-SwayOSD-fedora-%OS_VERSION%.repo
+      # nwg-displays (Phase 2.5) — GTK3 GUI for niri/Hyprland/sway output
+      # management. Sibling to baked `kanshi`. Writes ~/.config/niri/monitor.kdl
+      # which niri hot-reloads. Single-maintainer COPR — add to quarterly
+      # liveness check in MAINTENANCE.md. Fallback: install.sh from upstream.
+      - https://copr.fedorainfracloud.org/coprs/tofik/nwg-shell/repo/fedora-%OS_VERSION%/tofik-nwg-shell-fedora-%OS_VERSION%.repo
       # NOTE: Obsidian deferred to Phase 3b — alxhr0/Obsidian COPR was 404 as
       # of 2026-05-22 (GPG pubkey URL returns 404). Will install via AppImage
       # extract in Phase 3b alongside Polypane.
@@ -146,6 +151,7 @@ modules:
       # Phase 2.5 COPRs
       - nushell
       - swayosd
+      - nwg-displays            # tofik/nwg-shell COPR — niri output GUI
       # Phase 3a — GUI apps, all native repo-based (no AppImage extract here)
       - chromium                # Fedora base
       - browserpass             # Fedora base — pass integration for browsers

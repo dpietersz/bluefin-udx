@@ -48,6 +48,7 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 | `hyprlock`, `swayidle` | Terra + Fedora | system-integration (fingerprint lockscreen) |
 | `espanso-wayland` | Terra | system-tool (CAP_DAC_OVERRIDE via post-install) |
 | `noctalia-shell-v5` | COPR `lionheartp/Hyprland` | system-tool (Wayland shell) |
+| `nwg-displays` | COPR `tofik/nwg-shell` | system-integration (GTK3+python-gi GUI for niri output config; sibling to baked `kanshi`/`niri`. Writes `~/.config/niri/monitor.kdl`, niri hot-reloads. Fallback: upstream `install.sh`.) |
 | `grim` | Fedora repo | system-integration (Wayland screenshot capture — needed by niri+satty pipeline; satty itself lives user-scope in dotfiles via upstream GH release tarball, not baked, because the only COPR `mineiro/satty` is single-maintainer / 3-commits-young) |
 | `slurp` | Fedora repo | system-integration (Wayland region selector — paired with grim) |
 
