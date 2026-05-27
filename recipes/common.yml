@@ -63,12 +63,18 @@ modules:
   # ---------------------------------------------------------------------------
   # Client-side cosign verification for ghcr.io/dpietersz/* images.
   # Wires policy.json + registries.d so `rpm-ostree rebase ostree-image-signed:`
-  # validates the image signature against the bundled cosign pubkey at
-  # /usr/lib/pki/containers/bluefin-udx.pub before deploying. The repo also
-  # ships a compat symlink at the old `bluefin-udx-nvidia.pub` path so hosts
+  # validates the image signature before deploying. The ghcr.io/dpietersz
+  # namespace hosts images signed by two distinct keys, so the policy entry
+  # uses keyPaths (OR semantics):
+  #   /usr/lib/pki/containers/bluefin-udx.pub   — bluefin-udx[-nvidia] bootc images
+  #   /usr/lib/pki/containers/dpietersz.pub     — boxkit toolboxes
+  #                                                (udx-toolbox, playwright-toolbox);
+  #                                                vendored from
+  #                                                github.com/dpietersz/boxkit/cosign.pub
+  # The repo also ships a compat copy at `bluefin-udx-nvidia.pub` so hosts
   # whose /etc/containers/policy.json still references the old keyPath
   # (from the initial bridge fix) keep verifying across the rename.
-  # Pubkey + registries.d snippet land via the files module above; this script
+  # Pubkeys + registries.d snippet land via the files module above; this script
   # merges the policy.json entry (the only piece that can't be a static overlay
   # without clobbering upstream Bluefin entries).
   # ---------------------------------------------------------------------------
