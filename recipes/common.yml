@@ -192,6 +192,40 @@ modules:
       # All four live in user's distrobox toolbox setup (out of scope of this repo).
 
   # ---------------------------------------------------------------------------
+  # Phase 3d — OBS Studio + v4l2loopback (virtual camera).
+  #
+  # v4l2loopback (kernel module for the OBS virtual camera, exposing a
+  # /dev/video* device to Teams/Zoom/Slack): NOT layered here. The base
+  # `bluefin-dx` / `bluefin-dx-nvidia-open` images already ship
+  # `kmod-v4l2loopback`, pre-built and signed with the `ublue kernel` MOK
+  # key (already enrolled on the host, so it loads under Secure Boot).
+  # Adding a bluebuild `akmods` module on top fails with
+  # "cannot install both kmod-v4l2loopback ... from @commandline and ...
+  #  from @System" — verified empirically 2026-05-30.
+  #
+  # Do NOT add `akmod-v4l2loopback` from RPM Fusion as a "fix" — that's
+  # the unsigned, build-at-boot source-akmod which silently fails to load
+  # under Secure Boot.
+  #
+  # NVENC is compiled into RPM Fusion's `obs-studio` (used by the P14s NVIDIA
+  # dGPU). VAAPI is a SEPARATE Fedora-repo package (`obs-studio-plugin-vaapi`)
+  # — required for the T580's Intel iGPU hardware encoder. Both shipped so
+  # one image serves both laptops; per-machine encoder selection is in
+  # dotfiles via chezmoi templates.
+  #
+  # Module autoload + `exclusive_caps=1` (needed by Chromium-family apps —
+  # Teams, Zoom web — to see the virtual camera) are dropped via
+  # files/system/etc/modules-load.d/ and files/system/etc/modprobe.d/.
+  #
+  # User-layer config (portal config, OBS profile, mic filter chain,
+  # plugin pack) lives in dotfiles. See RECIPE.md.
+  # ---------------------------------------------------------------------------
+  - type: rpm-ostree
+    install:
+      - obs-studio
+      - obs-studio-plugin-vaapi
+
+  # ---------------------------------------------------------------------------
   # nwg-displays (Phase 2.5) — GTK3 output GUI for niri/Hyprland/sway.
   # Installed from upstream tarball rather than COPR because tofik/nwg-shell
   # is stuck on v0.3.28 (pre-niri); 0.4.x added niri detection via

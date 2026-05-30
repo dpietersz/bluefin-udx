@@ -104,6 +104,17 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     check_rpm slurp
     check_bin slurp
 
+    echo "Phase 3d OBS Studio + v4l2loopback:"
+    check_rpm obs-studio
+    check_bin obs
+    check_rpm obs-studio-plugin-vaapi
+    # ublue-signed kmod (from ghcr.io/ublue-os/akmods main flavor).
+    # Package name is `kmod-v4l2loopback` (meta) — backed by a versioned
+    # `kmod-v4l2loopback-<kernel>` sub-package. Check the meta.
+    check_rpm kmod-v4l2loopback
+    check_file /etc/modules-load.d/v4l2loopback.conf
+    check_file /etc/modprobe.d/v4l2loopback.conf
+
     # NVIDIA variant adds nvtop. CUDA toolkit intentionally not baked —
     # incompatible with atomic /usr/local redirect; use nvidia/cuda containers
     # per project instead. See bluefin-udx-nvidia.yml for full rationale.

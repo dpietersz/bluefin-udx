@@ -66,6 +66,16 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 | Zen Browser | COPR `sneexy/zen-browser` (fallback: `firminunderscore/zen-browser`) | daily driver browser |
 | Helium | Terra `helium-browser-bin` (pin version) | secondary browser |
 
+### Phase 3d (current — OBS Studio + virtual camera)
+
+| Package | Source | Maintained by | Why baked | Fallback if source dies | Last reviewed |
+|---|---|---|---|---|---|
+| `obs-studio` | RPM Fusion free | RPM Fusion | screen-share — GUI app with Wayland PipeWire portal integration; cannot live in distrobox without portal/PipeWire socket gymnastics, cannot live in dotfiles (atomic OS forbids `rpm-ostree` from chezmoi). NVENC compiled in. | switch to Flatpak (last resort, breaks the no-Flatpak rule) | 2026-05-30 |
+| `obs-studio-plugin-vaapi` | Fedora repo | Fedora | screen-share — VAAPI is a split package on modern obs-studio; required for the T580 (Intel iGPU) hardware encoder. Bake on both variants so one image serves both laptops. | n/a (Fedora repo) | 2026-05-30 |
+| `kmod-v4l2loopback` | **base image** (`bluefin-dx` / `bluefin-dx-nvidia-open` already ship it, signed with the `ublue kernel` MOK key enrolled on host) | Universal Blue | system-integration — kernel module for the OBS virtual camera (`/dev/video*` device exposed to Teams/Zoom/Slack). **Not layered** in this recipe — verified 2026-05-30 that a `type: akmods` block fails with "cannot install both ... from @commandline and ... from @System" because base already provides it. **Do NOT swap for RPM Fusion's `akmod-v4l2loopback`** — that is source-akmod, unsigned, build-at-boot, silently fails to load under Secure Boot (unlike the signed uBlue `kmod-nvidia-open` shipped on `-nvidia-open` base, which is NOT the RPM Fusion source-akmod). | if base ever drops it, re-add via bluebuild `akmods` module pulling from `ghcr.io/ublue-os/akmods` (main flavor) | 2026-05-30 |
+
+User-layer config (`xdg-desktop-portal` config, OBS profile templated per machine via `.hasNvidia`, mic filter-chain scene collection, OBS plugin pack) lives in dotfiles at `dot_config/obs-studio/` and `.chezmoiscripts/run_onchange_after_18-install-obs-plugins.sh.tmpl`. Module autoload (`/etc/modules-load.d/v4l2loopback.conf`) and module options (`/etc/modprobe.d/v4l2loopback.conf`, `exclusive_caps=1` for Chromium-family camera pickers) are baked here as `files/system/` overlays because they're `/etc/` system scope, not `$HOME`.
+
 ### Phase 3.5 (planned — Playwright system deps)
 
 System libraries the official Playwright Fedora deps list requires. Bake the libs, let `npm`/`npx playwright install` handle the playwright package + browsers per project. See https://playwright.dev/docs/intro
