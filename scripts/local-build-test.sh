@@ -108,12 +108,21 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     check_rpm obs-studio
     check_bin obs
     check_rpm obs-studio-plugin-vaapi
+    check_rpm v4l-utils
+    check_bin v4l2-ctl
     # ublue-signed kmod (from ghcr.io/ublue-os/akmods main flavor).
     # Package name is `kmod-v4l2loopback` (meta) — backed by a versioned
     # `kmod-v4l2loopback-<kernel>` sub-package. Check the meta.
     check_rpm kmod-v4l2loopback
     check_file /etc/modules-load.d/v4l2loopback.conf
     check_file /etc/modprobe.d/v4l2loopback.conf
+    # Pin sentinel: v4l2loopback should be pinned to /dev/video10 — keeps
+    # real cameras at the low /dev/videoN slots they would otherwise grab.
+    if ! grep -q "video_nr=10" /etc/modprobe.d/v4l2loopback.conf; then
+        echo "  FAIL: /etc/modprobe.d/v4l2loopback.conf missing video_nr=10 pin"
+        exit 1
+    fi
+    echo "  ok    video_nr=10 pin"
 
     # NVIDIA variant adds nvtop. CUDA toolkit intentionally not baked —
     # incompatible with atomic /usr/local redirect; use nvidia/cuda containers

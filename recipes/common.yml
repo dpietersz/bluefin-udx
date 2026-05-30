@@ -224,6 +224,7 @@ modules:
     install:
       - obs-studio
       - obs-studio-plugin-vaapi
+      - v4l-utils               # v4l2-ctl CLI — debug/inspect v4l2 devices
 
   # ---------------------------------------------------------------------------
   # nwg-displays (Phase 2.5) — GTK3 output GUI for niri/Hyprland/sway.
