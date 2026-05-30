@@ -126,6 +126,18 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     fi
     echo "  ok    video_nr=10 pin"
 
+    echo "Phase 3e showmethekey:"
+    check_rpm showmethekey
+    check_bin showmethekey-gtk
+    # Polkit rule ships in the RPM — confirm at least one polkit-1 file from
+    # the package landed under /usr/share/. Filename varies by version
+    # (me.alynx.* in 1.17.x; renamed later); glob instead of hardcoding.
+    if ! rpm -ql showmethekey 2>/dev/null | grep -q "/usr/share/polkit-1/"; then
+        echo "  FAIL: showmethekey RPM ships no /usr/share/polkit-1/ rule — input access would prompt for sudo"
+        exit 1
+    fi
+    echo "  ok    polkit rule shipped"
+
     # NVIDIA variant adds nvtop. CUDA toolkit intentionally not baked —
     # incompatible with atomic /usr/local redirect; use nvidia/cuda containers
     # per project instead. See bluefin-udx-nvidia.yml for full rationale.

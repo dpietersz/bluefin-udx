@@ -229,6 +229,36 @@ modules:
                                 # for OBS recording verification (runbook ref)
 
   # ---------------------------------------------------------------------------
+  # Phase 3e — showmethekey (Wayland keystroke visualizer for OBS recordings).
+  #
+  # Modern replacement for wshowkeys (all forks dead as of late 2025) and
+  # screenkey (X11-only). GTK4 overlay, reads /dev/input/event* via libinput
+  # directly, so compositor-agnostic and works on niri without layer-shell
+  # special-casing. Access to /dev/input is gated by a polkit rule shipped
+  # in the RPM (so no input-group membership trap on the host).
+  #
+  # COPR `pesader/showmethekey` is the endorsed Fedora path. Verified
+  # 2026-05-30 that fedora-44 has built RPMs at v1.17.0-2. This pre-dates
+  # the v1.19.0 polkit hardening that narrowed the allow rule to
+  # local-active-session only; on these single-user laptops the broader
+  # 1.17.0 rule is acceptable (no second local account exists to abuse it).
+  # Revisit if pesader bumps to >=1.19.0 — RECIPE.md row tracks the version.
+  #
+  # The COPR .repo file declares `gpgkey=` so dnf fetches the key at install
+  # time; no separate `keys:` entry needed (matches existing niri / Hyprland
+  # / zen-browser COPRs above).
+  #
+  # Startup invocation (`spawn-at-startup "showmethekey-gtk" "-kAC"`) and
+  # any toggle keybind live in dotfiles' niri/config.kdl.tmpl — this image
+  # only provides the binary + polkit rule.
+  # ---------------------------------------------------------------------------
+  - type: rpm-ostree
+    repos:
+      - https://copr.fedorainfracloud.org/coprs/pesader/showmethekey/repo/fedora-%OS_VERSION%/pesader-showmethekey-fedora-%OS_VERSION%.repo
+    install:
+      - showmethekey
+
+  # ---------------------------------------------------------------------------
   # nwg-displays (Phase 2.5) — GTK3 output GUI for niri/Hyprland/sway.
   # Installed from upstream tarball rather than COPR because tofik/nwg-shell
   # is stuck on v0.3.28 (pre-niri); 0.4.x added niri detection via
