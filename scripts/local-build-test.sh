@@ -110,6 +110,8 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     check_rpm obs-studio-plugin-vaapi
     check_rpm v4l-utils
     check_bin v4l2-ctl
+    check_rpm mediainfo
+    check_bin mediainfo
     # ublue-signed kmod (from ghcr.io/ublue-os/akmods main flavor).
     # Package name is `kmod-v4l2loopback` (meta) — backed by a versioned
     # `kmod-v4l2loopback-<kernel>` sub-package. Check the meta.

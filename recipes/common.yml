@@ -225,6 +225,8 @@ modules:
       - obs-studio
       - obs-studio-plugin-vaapi
       - v4l-utils               # v4l2-ctl CLI — debug/inspect v4l2 devices
+      - mediainfo               # readable codec/container/color-range inspection
+                                # for OBS recording verification (runbook ref)
 
   # ---------------------------------------------------------------------------
   # nwg-displays (Phase 2.5) — GTK3 output GUI for niri/Hyprland/sway.
