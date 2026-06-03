@@ -17,17 +17,31 @@
 set -euo pipefail
 
 REPO="nwg-piotr/nwg-displays"
-API_URL="https://api.github.com/repos/${REPO}/tags"
 CURL=(curl -fsSL)
 if [ -n "${GH_TOKEN:-}" ]; then
     CURL+=(-H "Authorization: Bearer ${GH_TOKEN}")
 fi
 
-echo "[nwg-displays] querying $API_URL"
-TAG=$("${CURL[@]}" "$API_URL" \
-    | grep -oE '"name": *"v?[0-9]+\.[0-9]+\.[0-9]+"' \
-    | head -n1 \
-    | sed -E 's/.*"(v?[0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
+# CI pre-resolves the tag using GITHUB_TOKEN (1000 req/h quota) and writes
+# it to /tmp/scripts/build-pins.env, avoiding the unauthenticated GitHub API
+# 60/h limit which both matrix legs share via the runner IP pool. Local
+# builds without this file fall back to the unauthenticated API call below.
+if [ -f /tmp/scripts/build-pins.env ]; then
+    # shellcheck disable=SC1091
+    . /tmp/scripts/build-pins.env
+fi
+
+if [ -n "${NWG_DISPLAYS_TAG:-}" ]; then
+    TAG="$NWG_DISPLAYS_TAG"
+    echo "[nwg-displays] using CI-resolved tag ${TAG}"
+else
+    API_URL="https://api.github.com/repos/${REPO}/tags"
+    echo "[nwg-displays] querying $API_URL"
+    TAG=$("${CURL[@]}" "$API_URL" \
+        | grep -oE '"name": *"v?[0-9]+\.[0-9]+\.[0-9]+"' \
+        | head -n1 \
+        | sed -E 's/.*"(v?[0-9]+\.[0-9]+\.[0-9]+)".*/\1/')
+fi
 
 if [ -z "$TAG" ]; then
     echo "[nwg-displays] ✗ could not resolve latest tag" >&2

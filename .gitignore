@@ -11,3 +11,4 @@ cosign.password
 # Local podman/buildah scratch
 .buildah/
 /.bluebuild-scripts_*
+files/scripts/build-pins.env

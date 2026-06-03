@@ -74,6 +74,30 @@ jobs:
       # podman writes layers straight to overlay storage; --jobs=1 forces
       # serial stage execution so peak RAM stays low.
       # ----------------------------------------------------------------------
+      # ----------------------------------------------------------------------
+      # Pre-resolve external "latest" versions using GITHUB_TOKEN (1000 req/h
+      # quota) BEFORE the build, write them to a pin file that the in-build
+      # scripts (install-nwg-displays-latest.sh, install-paseo-latest.sh) pick
+      # up from /tmp/scripts/. This avoids the unauthenticated GitHub API
+      # rate limit (60/h per IP) hit on 2026-06-03 — both matrix legs share
+      # the runner IP pool so the second leg's API calls 403'd. Scripts still
+      # work locally without this file (falls back to unauthenticated API).
+      # ----------------------------------------------------------------------
+      - name: Pre-resolve external versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NWG_TAG=$(gh api repos/nwg-piotr/nwg-displays/tags --jq '.[0].name')
+          PASEO_URL=$(gh api repos/getpaseo/paseo/releases/latest \
+            --jq '[.assets[] | select(.name | endswith("x86_64.rpm")) | .browser_download_url][0]')
+          {
+            echo "NWG_DISPLAYS_TAG=${NWG_TAG}"
+            echo "PASEO_RPM_URL=${PASEO_URL}"
+          } > files/scripts/build-pins.env
+          echo "=== Pin file ==="
+          cat files/scripts/build-pins.env
+
       - name: Generate Containerfile
         run: |
           set -euo pipefail
