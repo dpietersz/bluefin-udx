@@ -209,9 +209,14 @@ jobs:
           GHCR_USER: ${{ github.actor }}
         run: |
           set -euo pipefail
+          # Write the auth file world-readable so the unsudo'd cosign step
+          # can read it via REGISTRY_AUTH_FILE. Token is short-lived
+          # (GITHUB_TOKEN expires when the job ends) and the runner is
+          # ephemeral, so 0644 is acceptable here.
           echo "$GHCR_TOKEN" | sudo podman login ghcr.io \
             --username "$GHCR_USER" --password-stdin \
             --authfile /tmp/auth.json
+          sudo chmod 0644 /tmp/auth.json
           LOWER=$(printf '%s' "${IMAGE_REGISTRY}" | tr '[:upper:]' '[:lower:]')
           echo "lowercase=${LOWER}" >> "$GITHUB_OUTPUT"
 
@@ -252,6 +257,12 @@ jobs:
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
           COSIGN_PASSWORD: ""
+          # Point cosign at the auth.json written by the ghcr login step
+          # above. Without this it looks for ~/.docker/config.json which
+          # doesn't exist (the previous redhat-actions/podman-login@v1
+          # wrote there incidentally; the inlined `sudo podman login`
+          # writes to /tmp/auth.json instead).
+          REGISTRY_AUTH_FILE: /tmp/auth.json
           IMAGE_REF: ${{ steps.push.outputs.image_ref }}
         run: |
           set -euo pipefail
