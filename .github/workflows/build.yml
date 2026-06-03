@@ -39,29 +39,11 @@ jobs:
         uses: actions/checkout@v5
 
       # ----------------------------------------------------------------------
-      # Maximize free disk on the runner — Bluefin DX base + our adds easily
-      # blow past the default 14GB free. uBlue uses this pattern everywhere.
-      #
-      # ublue-os/remove-unwanted-software@v7 alone frees only ~3.5 GB, which is
-      # not enough since the Phase 3d OBS bake (2026-05-30, b5d183c..61d91c1)
-      # landed. The bluefin-udx-nvidia leg started OOM-killing the runner
-      # during `docker buildx --load` ("hosted runner lost communication",
-      # exit 143). jlumbroso/free-disk-space frees ~30 GB by removing dotnet,
-      # Android SDK, Haskell, CodeQL, and large preinstalled docker images.
-      # Belt-and-suspenders: keep the ublue step too — they target slightly
-      # different sets and the cost is ~3 minutes once.
+      # Disk cleanup. RAM (16 GB ceiling on ubuntu-24.04 hosted runners), not
+      # disk, is the actual constraint — see commit log for the buildx→podman
+      # switch below. We keep ublue-os/remove-unwanted-software@v7 anyway for
+      # the small headroom it gives, and log df for visibility.
       # ----------------------------------------------------------------------
-      - name: Free disk space (aggressive)
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: false   # apt list is slow; ublue step covers this
-          docker-images: true
-          swap-storage: false     # keep swap; dockerd needs the headroom
-
       - name: Maximize build space
         uses: ublue-os/remove-unwanted-software@v7
 
@@ -76,19 +58,21 @@ jobs:
         run: |
           set -euo pipefail
           INSTALLER_IMG="ghcr.io/blue-build/cli:latest-installer"
-          CID=$(docker create "$INSTALLER_IMG" /bin/true)
-          docker cp "$CID:/out/bluebuild" /usr/local/bin/bluebuild
-          docker rm "$CID" >/dev/null
-          chmod +x /usr/local/bin/bluebuild
+          CID=$(podman create "$INSTALLER_IMG" /bin/true)
+          podman cp "$CID:/out/bluebuild" /tmp/bluebuild
+          podman rm "$CID" >/dev/null
+          sudo install -m 0755 /tmp/bluebuild /usr/local/bin/bluebuild
           bluebuild --version
 
       # ----------------------------------------------------------------------
       # BUILD LOCALLY — no push, no sign.
-      # We use `bluebuild generate` (which emits a plain Containerfile) then
-      # build it with `docker buildx build --load`, which puts the image
-      # directly into the docker store. This avoids the docker-container
-      # buildx driver's "no output specified" behavior that bluebuild build
-      # triggers by default.
+      # `bluebuild generate` emits a plain Containerfile. We build it with
+      # rootful `sudo podman build --jobs=1`, replacing the previous
+      # `docker buildx --load` path which exhausted the runner's 16 GB RAM
+      # ceiling on the bluefin-udx-nvidia leg (buildkit holds parallel
+      # stages + the entire image in memory during --load materialization).
+      # podman writes layers straight to overlay storage; --jobs=1 forces
+      # serial stage execution so peak RAM stays low.
       # ----------------------------------------------------------------------
       - name: Generate Containerfile
         run: |
@@ -101,16 +85,17 @@ jobs:
           echo "=== Containerfile head ==="
           head -30 Containerfile.generated
 
-      - name: Build with docker buildx (load into docker store)
+      - name: Build with podman (serial stages, rootful overlay)
         run: |
           set -euo pipefail
-          docker buildx build \
-            --load \
+          sudo podman build \
+            --jobs=1 \
+            --pull=newer \
             -t "localhost/${{ matrix.recipe }}:latest" \
             -f Containerfile.generated \
             .
-          echo "Images in local docker store after build:"
-          docker images --format "{{.Repository}}:{{.Tag}}" | head -20
+          echo "Images in podman store after build:"
+          sudo podman images --format "{{.Repository}}:{{.Tag}}" | head -20
 
       # ----------------------------------------------------------------------
       # SMOKE-BOOT GATE.
@@ -121,15 +106,15 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="localhost/${{ matrix.recipe }}:latest"
-          if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-            echo "FAIL: $IMAGE not in docker store"
-            docker images
+          if ! sudo podman image exists "$IMAGE"; then
+            echo "FAIL: $IMAGE not in podman store"
+            sudo podman images
             exit 1
           fi
           echo "Smoke-testing $IMAGE"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
-          docker run --rm --entrypoint /bin/bash "$IMAGE" -c '
+          sudo podman run --rm --entrypoint /bin/bash "$IMAGE" -c '
             set -e
             FAIL=0
             check_bin() {
@@ -184,11 +169,12 @@ jobs:
       # ----------------------------------------------------------------------
       - name: Log in to ghcr
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: redhat-actions/podman-login@v1
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+          auth_file_path: /tmp/auth.json
 
       - name: Lowercase registry
         id: regcase
@@ -200,6 +186,8 @@ jobs:
       - name: Tag and push to ghcr
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         id: push
+        env:
+          REGISTRY_AUTH_FILE: /tmp/auth.json
         run: |
           set -euo pipefail
           SRC="${{ steps.smoke.outputs.image }}"
@@ -209,15 +197,17 @@ jobs:
           SHA_TAG="${GITHUB_SHA::7}"
 
           # Always push :stable + a dated tag + a sha tag (rollback targets).
+          # sudo -E preserves REGISTRY_AUTH_FILE so rootful podman finds the
+          # credentials written by redhat-actions/podman-login@v1.
           for TAG in stable "$DATE_TAG" "$SHA_TAG"; do
             DEST="${REG}/${NAME}:${TAG}"
-            docker tag "$SRC" "$DEST"
-            docker push "$DEST"
+            sudo podman tag "$SRC" "$DEST"
+            sudo -E podman push "$DEST"
             echo "pushed $DEST"
           done
 
           # Capture the digest of the :stable tag for cosign signing.
-          DIGEST=$(docker inspect "${REG}/${NAME}:stable" --format '{{index .RepoDigests 0}}' | sed 's/.*@//')
+          DIGEST=$(sudo podman inspect "${REG}/${NAME}:stable" --format '{{index .RepoDigests 0}}' | sed 's/.*@//')
           echo "image_ref=${REG}/${NAME}@${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "Will sign: ${REG}/${NAME}@${DIGEST}"
 
