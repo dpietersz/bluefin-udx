@@ -1,10 +1,20 @@
+# Beekeeper Studio — vendor RPM repo.
+#
+# Upstream's own .repo file at https://rpm.beekeeperstudio.io/beekeeper-studio.repo
+# points gpgkey= at /repo/repodata/repomd.xml.asc, which is a signature file,
+# not a public key — rpm-ostree fails with "Public key not found".
+# We ship a corrected .repo here and a baked GPG key at
+# files/system/etc/pki/rpm-gpg/RPM-GPG-KEY-beekeeper-studio so the image
+# build doesn't depend on rpm.beekeeperstudio.io being reachable for the key.
+#
+# Key fetched 2026-06-03 from https://rpm.beekeeperstudio.io/beekeeper.key
+#   Fingerprint: BC1C D0DD 651A 3C0E 382F  C894 E0DF 9378 AD1B 460B
+#   UID:         Beekeeper Studio <hello@beekeeperstudio.io>
+#   SHA-256:     f419f9ec302d8648583e7b7a25a9a21eaaaf0e82cb98d340800e27d92d7d5328
+
 [beekeeper-studio]
 name=Beekeeper Studio Repository
 baseurl=https://rpm.beekeeperstudio.io/repo/
 enabled=1
 gpgcheck=1
-# Upstream vendor's .repo file at https://rpm.beekeeperstudio.io/beekeeper-studio.repo
-# points gpgkey= at /repo/repodata/repomd.xml.asc which is a signature file,
-# not a key. rpm-ostree fails with "Public key not found" against that.
-# Ship a corrected file pointing at the actual GPG key.
-gpgkey=https://rpm.beekeeperstudio.io/beekeeper.key
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-beekeeper-studio

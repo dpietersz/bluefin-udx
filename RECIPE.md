@@ -58,7 +58,8 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 |---|---|---|
 | Chromium | Fedora repo | system-integration |
 | Browserpass + browserpass-chromium | Fedora repo | system-integration (native messaging w/ pass) |
-| Beekeeper Studio | vendor RPM (`beekeeperstudio.io`) | stable + integration |
+| Beekeeper Studio | vendor RPM (`beekeeperstudio.io`) — corrected `.repo` + baked GPG key | stable + integration |
+| Terra repo (espanso-wayland, hyprlock, helium-browser-bin) | metalink `tetsudou.fyralabs.com` + baked GPG key | unattended-build immunity to `repos.fyralabs.com` outages |
 | Bruno | vendor RPM (`usebruno.com`) | stable + integration |
 | LocalSend | GH releases RPM | system-integration (host firewall already wired) |
 | Polypane | AppImage extract → `/opt/polypane` | stable + integration |

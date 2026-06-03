@@ -93,6 +93,12 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     done
     echo "Phase 3b GUI apps:"
     check_rpm beekeeper-studio
+
+    echo "Baked GPG keys (insulate build from upstream key-host outages):"
+    check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-terra-44
+    check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-beekeeper-studio
+    check_file /etc/yum.repos.d/terra.repo
+    check_file /etc/yum.repos.d/beekeeper-studio.repo
     echo "Phase 3c additions:"
     check_rpm zed
     check_rpm postgresql

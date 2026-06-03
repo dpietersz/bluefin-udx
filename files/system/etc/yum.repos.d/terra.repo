@@ -1,0 +1,25 @@
+# Terra (Fyra Labs) — third-party Fedora repo.
+# Ships espanso-wayland, hyprlock, helium-browser-bin.
+#
+# Self-contained: metalink lets the client pick a healthy mirror (the primary
+# repos.fyralabs.com has had reachability outages — observed 2026-06-03) and
+# gpgkey points at the baked file under files/system/etc/pki/rpm-gpg/, so the
+# image build never depends on Fyra Labs' web endpoints being up.
+#
+# Key was fetched 2026-06-03 from https://mirror.june.fish/fyra/terra44/key.asc
+# (one of the metalink mirrors).
+#   Fingerprint: AE09 157A 4DE8 8B49 7EA1  D5D3 00CD AB43 DE22 6D6F
+#   UID:         Terra 44 <security@fyralabs.com>
+#   SHA-256:     77e2f7e36fe522c4c14d509741cadf83308b67b69800cf1ddc9ff8539925f468
+
+[terra]
+name=Terra $releasever
+metalink=https://tetsudou.fyralabs.com/metalink?repo=terra$releasever&arch=$basearch
+type=rpm
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-terra-$releasever
+enabled=1
+enabled_metadata=1
+metadata_expire=4h
+skip_if_unavailable=True

@@ -95,9 +95,14 @@ modules:
   # ---------------------------------------------------------------------------
   - type: rpm-ostree
     repos:
-      # Terra — espanso-wayland and hyprlock live here. The Terra RPM ships
-      # CAP_DAC_OVERRIDE pre-set on espanso, so no separate setcap module.
-      - https://github.com/terrapkg/subatomic-repos/raw/main/terra.repo
+      # Terra (espanso-wayland, hyprlock, helium-browser-bin) is NOT fetched
+      # over the network here — repos.fyralabs.com had a multi-hour outage on
+      # 2026-06-03 that killed the build mid-rpm-ostree (key.asc 30s timeout).
+      # Ship our own terra.repo at files/system/etc/yum.repos.d/terra.repo
+      # which uses tetsudou.fyralabs.com metalink (mirror redundancy) and
+      # points gpgkey= at a baked key under /etc/pki/rpm-gpg/. The file is
+      # placed by the `files` module which runs before rpm-ostree, so the
+      # repo is already on disk when this step runs.
       # niri compositor + supporting tools
       - https://copr.fedorainfracloud.org/coprs/yalter/niri/repo/fedora-%OS_VERSION%/yalter-niri-fedora-%OS_VERSION%.repo
       # noctalia-shell-v5
@@ -125,10 +130,11 @@ modules:
       # the upstream .repo file at rpm.beekeeperstudio.io/beekeeper-studio.repo
       # points gpgkey= at a *signature file* (repomd.xml.asc) rather than a
       # public key, so rpm-ostree refuses with "Public key not found".
-      # Corrected .repo file is shipped via files/system/etc/yum.repos.d/.
-    keys:
-      # GPG key for Beekeeper Studio's vendor repo (Phase 3b).
-      - https://rpm.beekeeperstudio.io/beekeeper.key
+      # Corrected .repo file + baked GPG key are shipped via
+      # files/system/etc/yum.repos.d/beekeeper-studio.repo and
+      # files/system/etc/pki/rpm-gpg/RPM-GPG-KEY-beekeeper-studio so the
+      # build does not depend on rpm.beekeeperstudio.io being up.
+    keys: []
     install:
       # Fedora base repos
       - kitty
