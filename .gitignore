@@ -12,3 +12,4 @@ cosign.password
 .buildah/
 /.bluebuild-scripts_*
 files/scripts/build-pins.env
+.claude/
