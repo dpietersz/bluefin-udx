@@ -196,21 +196,24 @@ jobs:
       # ----------------------------------------------------------------------
       # Push (only on main, only after smoke-boot passed).
       # ----------------------------------------------------------------------
-      - name: Log in to ghcr
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: redhat-actions/podman-login@v1
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-          auth_file_path: /tmp/auth.json
-
-      - name: Lowercase registry
+      # ghcr.io login + lowercase registry are inlined as shell to avoid
+      # third-party JavaScript actions (redhat-actions/podman-login@v1 and
+      # ASzc/change-string-case-action@v6 were the last two pinned to Node.js
+      # 20, deprecated by GitHub on 2026-06-16). No more upstream-action
+      # version chasing.
+      - name: Log in to ghcr + lowercase registry
         id: regcase
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: ASzc/change-string-case-action@v6
-        with:
-          string: ${{ env.IMAGE_REGISTRY }}
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          echo "$GHCR_TOKEN" | sudo podman login ghcr.io \
+            --username "$GHCR_USER" --password-stdin \
+            --authfile /tmp/auth.json
+          LOWER=$(printf '%s' "${IMAGE_REGISTRY}" | tr '[:upper:]' '[:lower:]')
+          echo "lowercase=${LOWER}" >> "$GITHUB_OUTPUT"
 
       - name: Tag and push to ghcr
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -226,8 +229,8 @@ jobs:
           SHA_TAG="${GITHUB_SHA::7}"
 
           # Always push :stable + a dated tag + a sha tag (rollback targets).
-          # sudo -E preserves REGISTRY_AUTH_FILE so rootful podman finds the
-          # credentials written by redhat-actions/podman-login@v1.
+          # sudo -E preserves REGISTRY_AUTH_FILE so rootful podman push
+          # finds the credentials written by `sudo podman login` above.
           for TAG in stable "$DATE_TAG" "$SHA_TAG"; do
             DEST="${REG}/${NAME}:${TAG}"
             sudo podman tag "$SRC" "$DEST"
