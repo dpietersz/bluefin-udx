@@ -41,9 +41,32 @@ jobs:
       # ----------------------------------------------------------------------
       # Maximize free disk on the runner — Bluefin DX base + our adds easily
       # blow past the default 14GB free. uBlue uses this pattern everywhere.
+      #
+      # ublue-os/remove-unwanted-software@v7 alone frees only ~3.5 GB, which is
+      # not enough since the Phase 3d OBS bake (2026-05-30, b5d183c..61d91c1)
+      # landed. The bluefin-udx-nvidia leg started OOM-killing the runner
+      # during `docker buildx --load` ("hosted runner lost communication",
+      # exit 143). jlumbroso/free-disk-space frees ~30 GB by removing dotnet,
+      # Android SDK, Haskell, CodeQL, and large preinstalled docker images.
+      # Belt-and-suspenders: keep the ublue step too — they target slightly
+      # different sets and the cost is ~3 minutes once.
       # ----------------------------------------------------------------------
+      - name: Free disk space (aggressive)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false   # apt list is slow; ublue step covers this
+          docker-images: true
+          swap-storage: false     # keep swap; dockerd needs the headroom
+
       - name: Maximize build space
         uses: ublue-os/remove-unwanted-software@v7
+
+      - name: Disk space after cleanup
+        run: df -h /
 
       # ----------------------------------------------------------------------
       # Install bluebuild CLI directly so we can drive build/push as separate
