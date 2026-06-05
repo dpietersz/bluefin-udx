@@ -250,8 +250,16 @@ jobs:
             echo "pushed $DEST"
           done
 
-          # Capture the digest of the :stable tag for cosign signing.
-          DIGEST=$(sudo podman inspect "${REG}/${NAME}:stable" --format '{{index .RepoDigests 0}}' | sed 's/.*@//')
+          # Capture the digest that consumers (rpm-ostree) actually pull when
+          # resolving :stable. ghcr wraps `podman push` results in an OCI
+          # image index, so the inner manifest digest reported by
+          # `podman inspect ... RepoDigests` is NOT the digest the tag floats
+          # to — the index digest is. Signing the inner manifest produced
+          # an unverifiable :stable (observed 2026-06-05: rpm-ostree upgrade
+          # rejected with "A signature was required, but no signature
+          # exists"). skopeo inspect docker://… resolves the tag against
+          # the registry and returns the canonical digest cosign should sign.
+          DIGEST=$(skopeo inspect "docker://${REG}/${NAME}:stable" --format '{{.Digest}}')
           echo "image_ref=${REG}/${NAME}@${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "Will sign: ${REG}/${NAME}@${DIGEST}"
 
