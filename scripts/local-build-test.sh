@@ -144,6 +144,14 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     fi
     echo "  ok    polkit rule shipped"
 
+    echo "Fingerprint resume hook (re-claims fprintd after suspend for hyprlock):"
+    check_file /usr/lib/systemd/system-sleep/50-fprintd-resume.sh
+    if [ ! -x /usr/lib/systemd/system-sleep/50-fprintd-resume.sh ]; then
+        echo "  FAIL: 50-fprintd-resume.sh present but not executable (systemd-sleep skips non-exec hooks)"
+        exit 1
+    fi
+    echo "  ok    50-fprintd-resume.sh executable"
+
     # NVIDIA variant adds nvtop. CUDA toolkit intentionally not baked —
     # incompatible with atomic /usr/local redirect; use nvidia/cuda containers
     # per project instead. See bluefin-udx-nvidia.yml for full rationale.

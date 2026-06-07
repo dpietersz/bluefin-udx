@@ -97,6 +97,7 @@ System libraries the official Playwright Fedora deps list requires. Bake the lib
 |---|---|---|
 | `/usr/share/wayland-sessions/niri.desktop` | Override `DesktopNames=niri` → `niri;GNOME` so display managers export an XDG_CURRENT_DESKTOP value Chromium recognises | Electron password-store detection — without `GNOME` in the tag, Storage Explorer / Vibe Typer fall back to plaintext backend and refuse to start despite a fully functional `org.freedesktop.secrets` |
 | `/usr/lib/environment.d/50-electron-keyring.conf` | Appends `:GNOME` to XDG_CURRENT_DESKTOP for the systemd user manager and everything it spawns | Belt-and-braces for sessions launched outside the DM (TTY, nested compositors) — same root cause as the niri.desktop override |
+| `/usr/lib/systemd/system-sleep/50-fprintd-resume.sh` | `try-restart fprintd.service` on resume so the fingerprint sensor is re-claimed fresh after suspend | Without it hyprlock's fingerprint auth is flaky for ~1-2s post-resume (stale libfprint device handle), causing the "unlock then re-lock" / password-fallback symptom on the P14s. `/usr/lib/systemd/system-sleep/` is immutable on atomic Bluefin, so the hook can't live in dotfiles |
 
 ## Explicitly NOT baked (with reasoning)
 
