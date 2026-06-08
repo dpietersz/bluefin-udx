@@ -77,11 +77,12 @@ jobs:
       # ----------------------------------------------------------------------
       # Pre-resolve external "latest" versions using GITHUB_TOKEN (1000 req/h
       # quota) BEFORE the build, write them to a pin file that the in-build
-      # scripts (install-nwg-displays-latest.sh, install-paseo-latest.sh) pick
-      # up from /tmp/scripts/. This avoids the unauthenticated GitHub API
-      # rate limit (60/h per IP) hit on 2026-06-03 — both matrix legs share
-      # the runner IP pool so the second leg's API calls 403'd. Scripts still
-      # work locally without this file (falls back to unauthenticated API).
+      # scripts (install-nwg-displays-latest.sh, install-paseo-latest.sh) can
+      # pick up from their bluebuild script/files mounts. This avoids the
+      # unauthenticated GitHub API rate limit (60/h per IP) hit on 2026-06-03 —
+      # both matrix legs share the runner IP pool so the second leg's API calls
+      # 403'd. Scripts still work locally without this file (falls back to
+      # unauthenticated API).
       # ----------------------------------------------------------------------
       - name: Pre-resolve external versions
         env:
@@ -164,6 +165,13 @@ jobs:
                      niri waybar pavucontrol NetworkManager-tui blueman SwayNotificationCenter \
                      espanso-wayland hyprlock noctalia-shell-v5 \
                      nushell swayosd; do check_rpm "$p"; done
+            # nwg-displays — installed from upstream tarball (not RPM-backed).
+            check_bin nwg-displays
+            if ! grep -q NIRI_SOCKET /usr/lib/python3.*/site-packages/nwg_displays/main.py 2>/dev/null; then
+                echo "  FAIL: nwg-displays installed but missing NIRI_SOCKET detection (pre-0.4)"
+                exit 1
+            fi
+            echo "  ok    nwg-displays (niri-aware)"
             echo "Phase 3a GUI apps:"
             for p in chromium browserpass browserpass-chromium zen-browser helium-browser-bin; do
                 check_rpm "$p"
@@ -181,6 +189,41 @@ jobs:
             check_bin psql
             check_rpm wtype
             check_bin wtype
+            check_rpm grim
+            check_bin grim
+            check_rpm slurp
+            check_bin slurp
+
+            echo "Phase 3d OBS Studio + v4l2loopback:"
+            check_rpm obs-studio
+            check_bin obs
+            check_rpm obs-studio-plugin-vaapi
+            check_rpm v4l-utils
+            check_bin v4l2-ctl
+            check_rpm mediainfo
+            check_bin mediainfo
+            check_rpm kmod-v4l2loopback
+            check_file /etc/modules-load.d/v4l2loopback.conf
+            check_file /etc/modprobe.d/v4l2loopback.conf
+            if ! grep -q "video_nr=10" /etc/modprobe.d/v4l2loopback.conf; then
+                echo "  FAIL: /etc/modprobe.d/v4l2loopback.conf missing video_nr=10 pin"
+                exit 1
+            fi
+            echo "  ok    video_nr=10 pin"
+
+            echo "Phase 3e showmethekey:"
+            check_rpm showmethekey
+            check_bin showmethekey-gtk
+            if ! rpm -ql showmethekey 2>/dev/null | grep -q "/usr/share/polkit-1/"; then
+                echo "  FAIL: showmethekey RPM ships no /usr/share/polkit-1/ rule — input access would prompt for sudo"
+                exit 1
+            fi
+            echo "  ok    polkit rule shipped"
+
+            echo "Fontconfig emoji cache:"
+            if fc-list | grep -qi "Noto Color Emoji"; then echo "  ok    fc-list Noto Color Emoji"; else echo "  MISS  fc-list Noto Color Emoji"; FAIL=1; fi
+            if fc-match emoji | grep -q "Noto Color Emoji"; then echo "  ok    fc-match emoji"; else echo "  MISS  fc-match emoji"; FAIL=1; fi
+
             # NVIDIA variant adds nvtop. CUDA toolkit not baked — use
             # nvidia/cuda containers per project (atomic /usr/local quirk).
             if [ "${{ matrix.recipe }}" = "bluefin-udx-nvidia" ]; then

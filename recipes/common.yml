@@ -275,3 +275,15 @@ modules:
     scripts:
       - install-nwg-displays-latest.sh
 
+  # ---------------------------------------------------------------------------
+  # Fontconfig cache rebuild.
+  # Run after all common font-bearing packages/apps are layered. The base image's
+  # baked cache can miss late-added fonts (notably Noto Color Emoji COLRv1), and
+  # ostree epoch-normalized font-dir mtimes can stop runtime lazy rescans from
+  # detecting the gap. Force one system cache rebuild here so Chromium-family and
+  # GTK fontconfig clients resolve emoji correctly on first boot.
+  # ---------------------------------------------------------------------------
+  - type: script
+    scripts:
+      - rebuild-font-cache.sh
+

@@ -56,7 +56,7 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 
 | Package | Source | Why baked |
 |---|---|---|
-| Chromium | Fedora repo | system-integration |
+| Chromium | Fedora repo | system-integration; also the **Widevine CDM donor for Helium** — dotfiles `run_after_15-sync-helium-widevine` mirrors Chromium's self-updated CDM into Helium so Spotify's web player works. Don't drop Chromium without adding another Widevine source. |
 | Browserpass + browserpass-chromium | Fedora repo | system-integration (native messaging w/ pass) |
 | Beekeeper Studio | vendor RPM (`beekeeperstudio.io`) — corrected `.repo` + baked GPG key | stable + integration |
 | Terra repo (espanso-wayland, hyprlock, helium-browser-bin) | metalink `tetsudou.fyralabs.com` + baked GPG key | unattended-build immunity to `repos.fyralabs.com` outages |
@@ -65,7 +65,7 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 | Polypane | AppImage extract → `/opt/polypane` | stable + integration |
 | Obsidian | COPR `cosmicfusion/Obsidian` (fallback: AppImage extract) | stable |
 | Zen Browser | COPR `sneexy/zen-browser` (fallback: `firminunderscore/zen-browser`) | daily driver browser |
-| Helium | Terra `helium-browser-bin` (pin version) | secondary browser |
+| Helium | Terra `helium-browser-bin` (pin version) | secondary browser — ships without Widevine; Spotify DRM fixed in dotfiles via the Chromium donor (see Chromium row) |
 
 ### Phase 3d (current — OBS Studio + virtual camera)
 
@@ -97,6 +97,12 @@ System libraries the official Playwright Fedora deps list requires. Bake the lib
 |---|---|---|
 | `/usr/share/wayland-sessions/niri.desktop` | Override `DesktopNames=niri` → `niri;GNOME` so display managers export an XDG_CURRENT_DESKTOP value Chromium recognises | Electron password-store detection — without `GNOME` in the tag, Storage Explorer / Vibe Typer fall back to plaintext backend and refuse to start despite a fully functional `org.freedesktop.secrets` |
 | `/usr/lib/environment.d/50-electron-keyring.conf` | Appends `:GNOME` to XDG_CURRENT_DESKTOP for the systemd user manager and everything it spawns | Belt-and-braces for sessions launched outside the DM (TTY, nested compositors) — same root cause as the niri.desktop override |
+
+## Build-time maintenance steps
+
+| Step | Purpose | Why baked |
+|---|---|---|
+| `files/scripts/rebuild-font-cache.sh` | Rebuild system fontconfig cache after font-bearing RPMs/apps are layered | Fixes COLRv1 emoji tofu caused by stale baked cache plus ostree epoch-normalized font-dir mtimes |
 
 ## Explicitly NOT baked (with reasoning)
 

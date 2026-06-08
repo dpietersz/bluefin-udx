@@ -10,20 +10,24 @@
 
 set -euo pipefail
 
-CURL=(curl -fsSL)
+CURL=(curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 300)
 # GH_TOKEN dramatically raises the API rate limit. Honored if CI passes it in.
 if [ -n "${GH_TOKEN:-}" ]; then
     CURL+=(-H "Authorization: Bearer ${GH_TOKEN}")
 fi
 
 # CI pre-resolves the .rpm URL using GITHUB_TOKEN (1000 req/h quota) and
-# writes it to /tmp/scripts/build-pins.env, avoiding the unauthenticated
-# GitHub API 60/h limit which both matrix legs share via the runner IP pool.
-# Local builds without this file fall back to the unauthenticated API call.
-if [ -f /tmp/scripts/build-pins.env ]; then
-    # shellcheck disable=SC1091
-    . /tmp/scripts/build-pins.env
-fi
+# writes build-pins.env before bluebuild generate. Depending on how the script
+# module stages files, the pin can surface via either /tmp/scripts or
+# /tmp/files/scripts. Local builds without this file fall back to the
+# unauthenticated API call.
+for PIN_FILE in /tmp/scripts/build-pins.env /tmp/files/scripts/build-pins.env; do
+    if [ -f "$PIN_FILE" ]; then
+        # shellcheck disable=SC1090
+        . "$PIN_FILE"
+        break
+    fi
+done
 
 if [ -n "${PASEO_RPM_URL:-}" ]; then
     RPM_URL="$PASEO_RPM_URL"
