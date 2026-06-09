@@ -190,6 +190,14 @@ modules:
       # in dotfiles. See RECIPE.md.
       - grim                    # Wayland screenshot capture (Fedora base)
       - slurp                   # Wayland region selector (Fedora base)
+      # wl-mirror — Wayland output mirror client (wlr-screencopy /
+      # ext-image-copy-capture, same screencopy family as grim above). niri has
+      # no native output mirroring, so dotfiles' niri-mirror-toggle (Ctrl+Alt+M)
+      # drives wl-mirror to clone the internal panel onto an external output.
+      # Host-native here so mirroring no longer depends on the Arch udx-toolbox
+      # being up; the toggle script already prefers a host binary and only falls
+      # back to the toolbox. Fedora base (wl-mirror 0.18.5-1.fc44), no new repo.
+      - wl-mirror               # Wayland output mirror client (Fedora base)
       # NOT baked (per user, out of scope for image):
       #   bruno      — ships only aarch64 RPM for Linux; x86_64 is .deb/.AppImage only
       #   localsend  — ships no RPM; .deb/.AppImage/.tar.gz only

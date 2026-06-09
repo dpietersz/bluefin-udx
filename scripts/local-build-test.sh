@@ -109,6 +109,8 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     check_bin grim
     check_rpm slurp
     check_bin slurp
+    check_rpm wl-mirror
+    check_bin wl-mirror
 
     echo "Phase 3d OBS Studio + v4l2loopback:"
     check_rpm obs-studio

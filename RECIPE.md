@@ -51,6 +51,7 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 | `nwg-displays` | upstream tarball via `install-nwg-displays-latest.sh` | system-integration (GTK3+python-gi GUI for niri output config; sibling to baked `kanshi`/`niri`. Writes `~/.config/niri/monitor.kdl`, niri hot-reloads. **Not COPR**: `tofik/nwg-shell` is stuck on v0.3.28 (pre-niri); upstream 0.4.x added `NIRI_SOCKET` detection. Fallback: switch back to `tofik/nwg-shell` COPR once they ship ≥ 0.4.0.) |
 | `grim` | Fedora repo | system-integration (Wayland screenshot capture — needed by niri+satty pipeline; satty itself lives user-scope in dotfiles via upstream GH release tarball, not baked, because the only COPR `mineiro/satty` is single-maintainer / 3-commits-young) |
 | `slurp` | Fedora repo | system-integration (Wayland region selector — paired with grim) |
+| `wl-mirror` | Fedora repo | system-integration (Wayland output mirror client — `wlr-screencopy`/`ext-image-copy-capture`, same screencopy family as `grim`/`slurp`. niri has no native output mirroring, so dotfiles `niri-mirror-toggle` (Ctrl+Alt+M) drives `wl-mirror` to clone the internal panel onto an external output. Host-native so mirroring no longer requires the Arch `udx-toolbox` being up; the toggle script prefers the host binary and falls back to the toolbox. Fedora base `0.18.5-1.fc44`, no new repo — fallback if it ever leaves Fedora base: `Ferdi265/wl-mirror` COPR or upstream source build.) |
 
 ### Phase 3 (planned — GUI apps)
 
