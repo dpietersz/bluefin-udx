@@ -90,8 +90,19 @@ jobs:
         run: |
           set -euo pipefail
           NWG_TAG=$(gh api repos/nwg-piotr/nwg-displays/tags --jq '.[0].name')
-          PASEO_URL=$(gh api repos/getpaseo/paseo/releases/latest \
-            --jq '[.assets[] | select(.name | endswith("x86_64.rpm")) | .browser_download_url][0]')
+          # Do NOT trust /releases/latest for paseo. getpaseo/paseo has shipped
+          # duplicate tags with empty "latest" releases (2026-06-10: two v0.1.93
+          # releases — the newer id 337050406 with 0 assets, which /releases/latest
+          # resolves to, and id 337050405 carrying Paseo-0.1.93-x86_64.rpm). An
+          # empty PASEO_URL writes an empty pin and the in-build script then aborts.
+          # Resolve across the releases LIST instead and pick the newest stable
+          # (non-draft, non-prerelease) release that ACTUALLY exposes an x86_64.rpm.
+          PASEO_URL=$(gh api "repos/getpaseo/paseo/releases?per_page=100" \
+            --jq '[.[] | select(.draft==false and .prerelease==false) | .assets[] | select(.name | endswith("x86_64.rpm")) | .browser_download_url][0] // empty')
+          if [ -z "$PASEO_URL" ] || [ "$PASEO_URL" = "null" ]; then
+            echo "::error::No getpaseo/paseo release exposes an x86_64.rpm asset — aborting before writing an empty pin"
+            exit 1
+          fi
           {
             echo "NWG_DISPLAYS_TAG=${NWG_TAG}"
             echo "PASEO_RPM_URL=${PASEO_URL}"

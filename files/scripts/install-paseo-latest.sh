@@ -33,16 +33,22 @@ if [ -n "${PASEO_RPM_URL:-}" ]; then
     RPM_URL="$PASEO_RPM_URL"
     echo "[paseo] using CI-resolved URL $RPM_URL"
 else
-    API_URL="https://api.github.com/repos/getpaseo/paseo/releases/latest"
+    # Query the releases LIST, not /releases/latest. getpaseo/paseo has shipped
+    # duplicate tags with an empty "latest" release (e.g. two v0.1.93 releases on
+    # 2026-06-10, the one /releases/latest resolves to carrying 0 assets). jq picks
+    # the newest stable (non-draft, non-prerelease) release that actually exposes an
+    # x86_64.rpm — same filter the CI pre-resolve step uses. jq is guaranteed
+    # present: recipes/common.yml installs it in the Phase-0 rpm-ostree module that
+    # runs before this script module (and bluefin-dx base ships it too). This path
+    # is the local/unauthenticated fallback (CI always uses the pre-resolved pin).
+    API_URL="https://api.github.com/repos/getpaseo/paseo/releases?per_page=100"
     echo "[paseo] querying $API_URL"
     RPM_URL=$("${CURL[@]}" "$API_URL" \
-        | grep -oE '"browser_download_url": *"[^"]*-x86_64\.rpm"' \
-        | head -n1 \
-        | sed -E 's/.*"(https:[^"]+)".*/\1/')
+        | jq -r '[.[] | select(.draft==false and .prerelease==false) | .assets[] | select(.name | endswith("x86_64.rpm")) | .browser_download_url][0] // empty')
 fi
 
 if [ -z "$RPM_URL" ]; then
-    echo "[paseo] ✗ could not find an x86_64 .rpm asset in latest release" >&2
+    echo "[paseo] ✗ could not find an x86_64 .rpm asset in any stable release" >&2
     exit 1
 fi
 
