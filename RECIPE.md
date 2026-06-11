@@ -103,7 +103,7 @@ System libraries the official Playwright Fedora deps list requires. Bake the lib
 
 | Step | Purpose | Why baked |
 |---|---|---|
-| `files/scripts/rebuild-font-cache.sh` | Rebuild system fontconfig cache after font-bearing RPMs/apps are layered | Fixes COLRv1 emoji tofu caused by stale baked cache plus ostree epoch-normalized font-dir mtimes |
+| `files/scripts/rebuild-font-cache.sh` | Rebuild system fontconfig cache after font-bearing RPMs/apps are layered | Partial COLRv1 emoji-tofu mitigation. **Not sufficient on its own** — rechunk normalizes font-dir mtimes *after* this cache is built, so at runtime fontconfig deems the baked cache stale and falls back to `~/.cache/fontconfig`. The durable fix is host-side in dotfiles (`dot_config/fontconfig/conf.d/75-emoji-color.conf` + `refresh-fontconfig-cache.service` rebuilding the user cache at login with the system `fc-cache`). Keep this bake as defense-in-depth for fresh boots with an empty user cache; don't treat it as the whole fix. |
 
 ## Explicitly NOT baked (with reasoning)
 
