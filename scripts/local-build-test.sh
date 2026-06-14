@@ -101,15 +101,17 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     check_file /etc/yum.repos.d/beekeeper-studio.repo
     echo "Phase 3c additions:"
     check_rpm zed
-    # Terra's zed is zfs-collision-aware: editor binary is `zeditor` and
-    # /usr/bin/zed must stay owned by the zfs package. Asserts the intended
-    # packaging survived (a monolithic che/zed-style zed would fail the build
-    # at the rpm-ostree conflict, but this catches a silent regression too).
+    # Terra zed is zfs-collision-aware: editor binary is zeditor and
+    # /usr/bin/zed must stay owned by the zfs package. A monolithic che/zed
+    # style zed would fail the build at the rpm-ostree conflict; this catches
+    # a silent regression too. This block runs inside a single-quoted run -c
+    # wrapper, so use only DOUBLE quotes here. A single quote or backtick in
+    # this region breaks out of the wrapper.
     check_bin zeditor
-    if rpm -qf /usr/bin/zed 2>/dev/null | grep -q '^zfs-'; then
+    if rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zfs-"; then
         echo "  ok    /usr/bin/zed owned by zfs (editor is zeditor)"
     else
-        echo "  FAIL: /usr/bin/zed not owned by zfs — monolithic zed reintroduced the collision"
+        echo "  FAIL: /usr/bin/zed not owned by zfs - monolithic zed reintroduced the collision"
         exit 1
     fi
     check_rpm postgresql
