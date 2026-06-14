@@ -101,6 +101,17 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     check_file /etc/yum.repos.d/beekeeper-studio.repo
     echo "Phase 3c additions:"
     check_rpm zed
+    # Terra's zed is zfs-collision-aware: editor binary is `zeditor` and
+    # /usr/bin/zed must stay owned by the zfs package. Asserts the intended
+    # packaging survived (a monolithic che/zed-style zed would fail the build
+    # at the rpm-ostree conflict, but this catches a silent regression too).
+    check_bin zeditor
+    if rpm -qf /usr/bin/zed 2>/dev/null | grep -q '^zfs-'; then
+        echo "  ok    /usr/bin/zed owned by zfs (editor is zeditor)"
+    else
+        echo "  FAIL: /usr/bin/zed not owned by zfs — monolithic zed reintroduced the collision"
+        exit 1
+    fi
     check_rpm postgresql
     check_bin psql
     check_rpm wtype

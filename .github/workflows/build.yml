@@ -196,6 +196,18 @@ jobs:
             check_file /etc/yum.repos.d/beekeeper-studio.repo
             echo "Phase 3c additions:"
             check_rpm zed
+            # Terra's zed is zfs-collision-aware: editor binary is `zeditor`
+            # and /usr/bin/zed must stay owned by the zfs package. If a
+            # monolithic zed (e.g. a re-added che/zed COPR) wins resolution,
+            # the build would already have died on a file conflict — this
+            # asserts the intended packaging survived even if it built.
+            check_bin zeditor
+            if rpm -qf /usr/bin/zed 2>/dev/null | grep -q '^zfs-'; then
+                echo "  ok    /usr/bin/zed owned by zfs (editor is zeditor)"
+            else
+                echo "  FAIL: /usr/bin/zed not owned by zfs — monolithic zed reintroduced the collision"
+                exit 1
+            fi
             check_rpm postgresql
             check_bin psql
             check_rpm wtype

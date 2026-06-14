@@ -122,10 +122,23 @@ modules:
       # Zen Browser (Phase 3a) — community COPR, auto-rebuilt from upstream
       # Zen release binaries. Fallback: firminunderscore/zen-browser.
       - https://copr.fedorainfracloud.org/coprs/sneexy/zen-browser/repo/fedora-%OS_VERSION%/sneexy-zen-browser-fedora-%OS_VERSION%.repo
-      # Zed editor (Phase 3c) — no official vendor RPM. che/zed is the active
-      # community COPR (latest build 2026-05-15, supports fedora-44). Terra
-      # doesn't ship zed. Fallback: build from source via install script.
-      - https://copr.fedorainfracloud.org/coprs/che/zed/repo/fedora-%OS_VERSION%/che-zed-fedora-%OS_VERSION%.repo
+      # Zed editor (Phase 3c) — sourced from Terra (already enabled above for
+      # espanso-wayland/hyprlock/helium-browser-bin), NOT a dedicated COPR.
+      # History: we used the che/zed COPR until 2026-06-14. Both Terra and
+      # che/zed ship a package literally named `zed`, so dnf resolved the
+      # install to whichever had the higher version. Terra's `zed` is
+      # zfs-collision-aware — it carries `Requires: (zed-cli-compat-zfs if zfs
+      # else zed-cli)`, so on a zfs-shipping base (bluefin-dx does) the editor
+      # binary lands at /usr/bin/zeditor and /usr/bin/zed stays owned by the
+      # zfs package (the ZFS Event Daemon). che/zed's `zed` is monolithic: it
+      # claims /usr/bin/zed *and* dev.zed.Zed.desktop/metainfo. While che/zed
+      # trailed Terra in version it lost the dnf race and builds passed; once
+      # che/zed published 1.6.3 (> Terra 1.5.5) it won every resolution and the
+      # transaction died on a 3-way file conflict (editor /usr/bin/zed vs zfs,
+      # plus .desktop/.metainfo vs Terra's zed-cli-compat-zfs). Dropping the
+      # COPR removes the second, redundant zed source entirely so Terra is the
+      # sole, version-coherent provider. One fewer independent upstream that can
+      # bump out from under the nightly build. See RECIPE.md zed row.
       # Beekeeper Studio (Phase 3b) — NOT loaded from vendor URL because
       # the upstream .repo file at rpm.beekeeperstudio.io/beekeeper-studio.repo
       # points gpgkey= at a *signature file* (repomd.xml.asc) rather than a
@@ -177,7 +190,7 @@ modules:
       - browserpass-chromium    # Fedora base
       - zen-browser             # sneexy/zen-browser COPR
       - helium-browser-bin      # Terra (already enabled)
-      - zed                     # che/zed COPR — code editor
+      - zed                     # Terra — code editor (binary: zeditor; see repo comment)
       # Phase 3b — vendor yum repos
       - beekeeper-studio        # rpm.beekeeperstudio.io vendor repo
       # Phase 3c — Fedora base CLI essentials baked
