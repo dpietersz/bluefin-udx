@@ -28,8 +28,16 @@ done
 
 # ---------- 2. Default config ---------------------------------------------
 mkdir -p /etc/teams-for-linux
+# followSystemTheme MUST be false on teams-for-linux 2.11.x. 2.11.0 flipped the
+# default to true (upstream PR #2566), which makes the client write
+# followOsTheme=true into Teams' clientPreferences; because this client can't
+# supply a HostTheme value, Teams' GraphQL mutation rejects it and the Dark theme
+# toggle silently stops working (upstream issue #2662). 2.12.0 (PR #2673) fixes
+# the root cause but keeps the true default, so this explicit opt-out is correct
+# on both. Mirrored in dotfiles dot_config/teams-for-linux/config.json.
 cat > /etc/teams-for-linux/config.json.default <<'EOF'
 {
+  "followSystemTheme": false,
   "disableGpu": false,
   "screenSharing": {
     "lockInhibitionMethod": "WakeLockSentinel"
