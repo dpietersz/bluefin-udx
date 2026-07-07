@@ -297,14 +297,37 @@ modules:
       - install-nwg-displays-latest.sh
 
   # ---------------------------------------------------------------------------
-  # Fontconfig cache rebuild.
+  # Fontconfig cache rebuild (build-time, best-effort).
   # Run after all common font-bearing packages/apps are layered. The base image's
   # baked cache can miss late-added fonts (notably Noto Color Emoji COLRv1), and
   # ostree epoch-normalized font-dir mtimes can stop runtime lazy rescans from
   # detecting the gap. Force one system cache rebuild here so Chromium-family and
   # GTK fontconfig clients resolve emoji correctly on first boot.
+  #
+  # NOTE: this build-time pass is NOT sufficient on its own — ostree/composefs
+  # gives /usr/share/fonts an epoch mtime at runtime that never matches the mtime
+  # baked into any cache, so fontconfig rescans /usr/share/fonts live on every
+  # process start and that rescan races font-dir churn at login (-> monospace +
+  # tofu emoji in Helium/Teams that sticks for the whole session). The durable
+  # fix is the runtime piece below: fc-cache-boot.service rebuilds the system
+  # caches into the shared, writable /var/cache/fontconfig before the display
+  # manager. See files/system/etc/fonts/conf.d/05-bluefin-writable-cache.conf.
   # ---------------------------------------------------------------------------
   - type: script
     scripts:
       - rebuild-font-cache.sh
+
+  # ---------------------------------------------------------------------------
+  # Enable the boot-time fontconfig cache rebuild.
+  # Unit + cachedir conf + tmpfiles dir ship via the `files` module
+  # (files/system/...). This service runs `fc-cache --system-only --force` into
+  # /var/cache/fontconfig early at every boot, Before=display-manager.service, so
+  # GUI apps read a valid cache instead of doing a fragile live rescan of
+  # /usr/share/fonts. This is the durable fix for color emoji rendering as tofu
+  # (and whole-page monospace fallback) in Chromium/Electron after image updates.
+  # ---------------------------------------------------------------------------
+  - type: systemd
+    system:
+      enabled:
+        - fc-cache-boot.service
 

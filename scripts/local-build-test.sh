@@ -162,6 +162,27 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     echo "Fontconfig emoji cache:"
     if fc-list | grep -qi "Noto Color Emoji"; then echo "  ok    fc-list Noto Color Emoji"; else echo "  MISS  fc-list Noto Color Emoji"; FAIL=1; fi
     if fc-match emoji | grep -q "Noto Color Emoji"; then echo "  ok    fc-match emoji"; else echo "  MISS  fc-match emoji"; FAIL=1; fi
+    # Durable runtime fix: writable shared cachedir + boot rebuild service.
+    # /usr/share/fonts is perpetually re-scanned live under composefs (epoch mtime
+    # never matches any baked cache), which races login font-dir churn and leaves
+    # Helium/Teams in monospace + tofu for the session. fc-cache-boot.service
+    # rebuilds the system caches into /var/cache/fontconfig before the DM.
+    check_file /etc/fonts/conf.d/05-bluefin-writable-cache.conf
+    check_file /usr/lib/tmpfiles.d/fontconfig-var-cache.conf
+    check_file /usr/lib/systemd/system/fc-cache-boot.service
+    if grep -q "/var/cache/fontconfig" /etc/fonts/conf.d/05-bluefin-writable-cache.conf; then
+        echo "  ok    /var/cache/fontconfig registered as cachedir"
+    else
+        echo "  MISS  /var/cache/fontconfig cachedir not registered"; FAIL=1
+    fi
+    # Service must be enabled (wants symlink present) so it actually runs at boot.
+    if systemctl is-enabled fc-cache-boot.service >/dev/null 2>&1 \
+        || ls /etc/systemd/system/multi-user.target.wants/fc-cache-boot.service \
+              /usr/lib/systemd/system/multi-user.target.wants/fc-cache-boot.service >/dev/null 2>&1; then
+        echo "  ok    fc-cache-boot.service enabled"
+    else
+        echo "  MISS  fc-cache-boot.service not enabled"; FAIL=1
+    fi
 
     # NVIDIA variant adds nvtop. CUDA toolkit intentionally not baked —
     # incompatible with atomic /usr/local redirect; use nvidia/cuda containers
