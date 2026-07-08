@@ -1,20 +1,20 @@
 [Unit]
 Description=Rebuild the system fontconfig cache before the graphical session
 Documentation=man:fc-cache(1)
-# WHY (read before deleting): /usr/share/fonts presents an epoch (1970) mtime
-# under ostree/composefs while every fontconfig cache that indexes it records a
-# real mtime at build time, so fontconfig deems the cache stale and rescans
-# /usr/share/fonts LIVE on every process start. When that rescan races font-dir
-# churn at login (e.g. a distrobox host-font bind-mount as the niri session
-# comes up), Chromium/Electron apps (Helium, teams-for-linux) lose the system
-# sans-serif and cache a last-resort font for their whole session: monospace
-# text + tofu/blank emoji. This unit rebuilds the system caches into the shared
-# writable /var/cache/fontconfig (the first cachedir, see
-# /etc/fonts/conf.d/05-bluefin-writable-cache.conf) EARLY — in a quiet namespace
-# before the display manager and before any distrobox/user font churn — so the
-# captured mtime stays stable and the cache validates for the rest of the
-# session. GUI apps then read a valid cache instead of rescanning. Ordered
-# Before=display-manager.service so no GUI session can start until it completes.
+# WHY (read before deleting): /usr/share/fonts presents an epoch (1970) checksum
+# under ostree/composefs at runtime. If fc-cache runs while that dir isn't fully
+# materialized, it writes a cache that indexes it as EMPTY and stamps the epoch
+# checksum, so the cache validates FOREVER and never self-heals: real serif fonts
+# (Noto Serif, Liberation) go invisible and Chromium/Electron (Helium, Teams,
+# PDFium) fall back to a Nerd Font for `serif` -> monospace digits + wrong serif
+# + tofu. This unit does an early, guarded rebuild into the shared writable
+# /var/cache/fontconfig (the first cachedir, see
+# /etc/fonts/conf.d/05-bluefin-writable-cache.conf) before the DM. The ExecStart
+# VERIFIES a canary font is visible and DELETES the cache if the scan came up
+# empty, so it can never publish a poisoned cache. The authoritative repair is
+# the user-scope verify-and-heal in dotfiles (refresh-fontconfig-cache.service ->
+# fontconfig-heal.sh), which rebuilds ~/.cache once the session is up; this unit
+# is the system-cache half. Ordered Before=display-manager.service.
 After=local-fs.target systemd-tmpfiles-setup.service
 Before=display-manager.service
 ConditionPathExists=/usr/bin/fc-cache
@@ -26,12 +26,21 @@ RemainAfterExit=yes
 # exists even if tmpfiles ordering ever changes. fc-cache writes the system font
 # caches to the first writable cachedir, which is /var/cache/fontconfig.
 ExecStartPre=-/usr/bin/mkdir -p /var/cache/fontconfig
-# --system-only: scan only system font dirs (skip per-user ~/.fonts, which the
-# user-scope refresh-fontconfig-cache.service in dotfiles already handles and
-# whose caches validate fine). --force: rebuild unconditionally — the entire bug
-# is fontconfig mis-deciding a stale cache is fresh, so never trust its staleness
-# check here. Costs ~1-2s at boot; runs before the DM, not on the login path.
-ExecStart=/usr/bin/fc-cache --system-only --force
+# Full `fc-cache --force` (NOT --system-only, which exits 1 on this image and
+# produced exactly the poisoned cache this service was meant to prevent). Running
+# as root before the DM, fc-cache writes to the first writable cachedir
+# (/var/cache/fontconfig) and, with ~ = /root, never touches /home.
+#
+# CRITICAL guard: if this runs before /usr/share/fonts is fully materialized
+# under composefs, fc-cache indexes it as EMPTY and stamps the epoch checksum, so
+# the cache validates forever and never self-heals — real serif fonts go
+# invisible and Chromium/Electron fall to a Nerd Font for `serif`. That poisoned
+# cache is WORSE than none (a missing cache triggers a live rescan that can
+# succeed later; a valid-empty one never does). So verify a canary baked font is
+# visible after the rebuild; if it isn't, delete what we just wrote so the next
+# reader rescans live, and let the user-scope heal (dotfiles
+# refresh-fontconfig-cache.service) rebuild ~/.cache once the session is up.
+ExecStart=/usr/bin/bash -c '/usr/bin/fc-cache --force; if ! /usr/bin/fc-list | grep -qi "Noto Serif"; then echo "fc-cache-boot: /usr/share/fonts not materialized; removing poisoned cache so readers rescan live" >&2; rm -f /var/cache/fontconfig/*; fi'
 
 [Install]
 WantedBy=multi-user.target

@@ -162,11 +162,13 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     echo "Fontconfig emoji cache:"
     if fc-list | grep -qi "Noto Color Emoji"; then echo "  ok    fc-list Noto Color Emoji"; else echo "  MISS  fc-list Noto Color Emoji"; FAIL=1; fi
     if fc-match emoji | grep -q "Noto Color Emoji"; then echo "  ok    fc-match emoji"; else echo "  MISS  fc-match emoji"; FAIL=1; fi
-    # Durable runtime fix: writable shared cachedir + boot rebuild service.
-    # /usr/share/fonts is perpetually re-scanned live under composefs (epoch mtime
-    # never matches any baked cache), which races login font-dir churn and leaves
-    # Helium/Teams in monospace + tofu for the session. fc-cache-boot.service
-    # rebuilds the system caches into /var/cache/fontconfig before the DM.
+    # Guarded runtime fix: writable shared cachedir + verified boot rebuild.
+    # Under composefs an fc-cache run before /usr/share/fonts materialises writes
+    # a valid-but-empty cache that validates forever, hiding real serif fonts so
+    # Chromium/Electron pick a Nerd Font for `serif`. fc-cache-boot.service does a
+    # guarded rebuild into /var/cache/fontconfig before the DM (verifies a canary
+    # font, deletes the cache if empty so it can never poison). The authoritative
+    # repair is the user-scope fontconfig-heal.sh in dotfiles.
     check_file /etc/fonts/conf.d/05-bluefin-writable-cache.conf
     check_file /usr/lib/tmpfiles.d/fontconfig-var-cache.conf
     check_file /usr/lib/systemd/system/fc-cache-boot.service

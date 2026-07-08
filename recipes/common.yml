@@ -305,13 +305,15 @@ modules:
   # GTK fontconfig clients resolve emoji correctly on first boot.
   #
   # NOTE: this build-time pass is NOT sufficient on its own — ostree/composefs
-  # gives /usr/share/fonts an epoch mtime at runtime that never matches the mtime
-  # baked into any cache, so fontconfig rescans /usr/share/fonts live on every
-  # process start and that rescan races font-dir churn at login (-> monospace +
-  # tofu emoji in Helium/Teams that sticks for the whole session). The durable
-  # fix is the runtime piece below: fc-cache-boot.service rebuilds the system
-  # caches into the shared, writable /var/cache/fontconfig before the display
-  # manager. See files/system/etc/fonts/conf.d/05-bluefin-writable-cache.conf.
+  # gives /usr/share/fonts an epoch checksum at runtime. If any fc-cache runs
+  # while that dir isn't fully materialized it writes a valid-but-EMPTY cache
+  # that validates forever, hiding the real serif fonts so Chromium/Electron fall
+  # to a Nerd Font for `serif` (monospace digits + wrong serif + tofu). The
+  # system-cache half is the guarded fc-cache-boot.service below; the
+  # authoritative repair is the user-scope verify-and-heal in dotfiles
+  # (refresh-fontconfig-cache.service -> ~/.local/bin/scripts/fontconfig-heal.sh),
+  # which rebuilds ~/.cache until real fonts are visible and survives both image
+  # updates and chezmoi apply.
   # ---------------------------------------------------------------------------
   - type: script
     scripts:
@@ -320,11 +322,12 @@ modules:
   # ---------------------------------------------------------------------------
   # Enable the boot-time fontconfig cache rebuild.
   # Unit + cachedir conf + tmpfiles dir ship via the `files` module
-  # (files/system/...). This service runs `fc-cache --system-only --force` into
-  # /var/cache/fontconfig early at every boot, Before=display-manager.service, so
-  # GUI apps read a valid cache instead of doing a fragile live rescan of
-  # /usr/share/fonts. This is the durable fix for color emoji rendering as tofu
-  # (and whole-page monospace fallback) in Chromium/Electron after image updates.
+  # (files/system/...). The service does a guarded `fc-cache --force` into
+  # /var/cache/fontconfig early at every boot, Before=display-manager.service: it
+  # verifies a canary font is visible afterward and DELETES the cache if the scan
+  # came up empty, so it can never publish a poisoned valid-empty cache (the bug
+  # the old `--system-only` variant caused). See the unit header and
+  # files/system/etc/fonts/conf.d/05-bluefin-writable-cache.conf.
   # ---------------------------------------------------------------------------
   - type: systemd
     system:
