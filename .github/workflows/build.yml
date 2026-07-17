@@ -121,15 +121,45 @@ jobs:
           echo "=== Containerfile head ==="
           head -30 Containerfile.generated
 
+      # Retried because every fetch this build makes — COPR repomd.xml, the
+      # ghcr.io/blue-build/modules/* images mounted per step, vendor RPMs — is an
+      # unretried network call, and one blip kills the whole ~10 min build. Three
+      # scheduled runs died this way, each on a different upstream and each on a
+      # URL that was serving 200 again by the time it was checked:
+      #   2026-07-03  COPR 503 on celestelove/SwayOSD repomd.xml
+      #   2026-07-10  ghcr blob copy died mid-pull of modules/files:latest,
+      #               surfaced as the misleading "no stage or image found"
+      #   2026-07-17  COPR 504 on yalter/niri repomd.xml
+      # Backoff is minutes, not seconds: COPR gateway errors ride out a load
+      # spike rather than a packet loss, so an immediate retry just re-fails.
+      # Podman's layer cache makes attempt N+1 resume near the failure point.
+      #
+      # Tradeoff, deliberately accepted: a genuine recipe break (e.g. the
+      # 2026-06-14 zed/zfs collision) now burns all 3 attempts + 3 min of sleep
+      # before it reports. On a nightly job that is worth trading for not losing
+      # an image to someone else's 504. Do NOT "fix" this by pattern-matching the
+      # error text to decide retryability — the 07-10 pull failure proves upstream
+      # reports transient faults with non-transient-looking messages.
       - name: Build with podman (serial stages, rootful overlay)
         run: |
           set -euo pipefail
-          sudo podman build \
-            --jobs=1 \
-            --pull=newer \
-            -t "localhost/${{ matrix.recipe }}:latest" \
-            -f Containerfile.generated \
-            .
+          for attempt in 1 2 3; do
+            if sudo podman build \
+              --jobs=1 \
+              --pull=newer \
+              -t "localhost/${{ matrix.recipe }}:latest" \
+              -f Containerfile.generated \
+              . ; then
+              echo "build succeeded on attempt ${attempt}"
+              break
+            fi
+            if [ "${attempt}" -eq 3 ]; then
+              echo "::error::podman build failed 3/3 attempts — not a transient upstream blip, read the log above"
+              exit 1
+            fi
+            echo "::warning::build attempt ${attempt}/3 failed — retrying in ${attempt}m"
+            sleep "$((attempt * 60))"
+          done
           echo "Images in podman store after build:"
           sudo podman images --format "{{.Repository}}:{{.Tag}}" | head -20
 
