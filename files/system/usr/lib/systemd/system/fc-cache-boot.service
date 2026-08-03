@@ -1,46 +1,36 @@
 [Unit]
-Description=Rebuild the system fontconfig cache before the graphical session
+Description=Rebuild and epoch-stamp the system fontconfig cache before the graphical session
 Documentation=man:fc-cache(1)
-# WHY (read before deleting): /usr/share/fonts presents an epoch (1970) checksum
-# under ostree/composefs at runtime. If fc-cache runs while that dir isn't fully
-# materialized, it writes a cache that indexes it as EMPTY and stamps the epoch
-# checksum, so the cache validates FOREVER and never self-heals: real serif fonts
-# (Noto Serif, Liberation) go invisible and Chromium/Electron (Helium, Teams,
-# PDFium) fall back to a Nerd Font for `serif` -> monospace digits + wrong serif
-# + tofu. This unit does an early, guarded rebuild into the shared writable
-# /var/cache/fontconfig (the first cachedir, see
-# /etc/fonts/conf.d/05-bluefin-writable-cache.conf) before the DM. The ExecStart
-# VERIFIES a canary font is visible and DELETES the cache if the scan came up
-# empty, so it can never publish a poisoned cache. The authoritative repair is
-# the user-scope verify-and-heal in dotfiles (refresh-fontconfig-cache.service ->
-# fontconfig-heal.sh), which rebuilds ~/.cache once the session is up; this unit
-# is the system-cache half. Ordered Before=display-manager.service.
+Documentation=https://github.com/89luca89/distrobox/issues/1945
+# WHY (read before deleting): distrobox shares the host $HOME with every toolbox,
+# so ~/.cache/fontconfig is ONE directory used by the host and all containers.
+# fontconfig keys cache files on md5(<absolute dir path>), and /usr/share/fonts
+# means something completely different inside an Ubuntu toolbox than it does on
+# the host. A container touching fonts therefore writes a ~216-byte cache under
+# the host's exact key, and every baked system font goes invisible on the host —
+# Chromium/Electron then render `serif` as a Nerd Font (wrong serif, wide digits,
+# tofu).
+#
+# The fix is NOT cachedir ordering (conf.d is included before the cachedir block,
+# so /var/cache/fontconfig can only be FIRST, and first loses). The fix is to
+# stamp our cache files to the UNIX epoch, which triggers fontconfig's OSTree
+# accommodation in FcCacheTimeValid/FcDirCacheMapHelper and wins from any
+# position. Full rationale, the measured evidence table, and the fontconfig 2.18
+# caveat live in the script below — read it before changing anything here.
 After=local-fs.target systemd-tmpfiles-setup.service
 Before=display-manager.service
 ConditionPathExists=/usr/bin/fc-cache
+ConditionPathExists=/usr/libexec/bluefin-udx/fc-cache-boot.sh
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# Belt-and-suspenders: the tmpfiles snippet creates this, but guarantee it
-# exists even if tmpfiles ordering ever changes. fc-cache writes the system font
-# caches to the first writable cachedir, which is /var/cache/fontconfig.
-ExecStartPre=-/usr/bin/mkdir -p /var/cache/fontconfig
-# Full `fc-cache --force` (NOT --system-only, which exits 1 on this image and
-# produced exactly the poisoned cache this service was meant to prevent). Running
-# as root before the DM, fc-cache writes to the first writable cachedir
-# (/var/cache/fontconfig) and, with ~ = /root, never touches /home.
-#
-# CRITICAL guard: if this runs before /usr/share/fonts is fully materialized
-# under composefs, fc-cache indexes it as EMPTY and stamps the epoch checksum, so
-# the cache validates forever and never self-heals — real serif fonts go
-# invisible and Chromium/Electron fall to a Nerd Font for `serif`. That poisoned
-# cache is WORSE than none (a missing cache triggers a live rescan that can
-# succeed later; a valid-empty one never does). So verify a canary baked font is
-# visible after the rebuild; if it isn't, delete what we just wrote so the next
-# reader rescans live, and let the user-scope heal (dotfiles
-# refresh-fontconfig-cache.service) rebuild ~/.cache once the session is up.
-ExecStart=/usr/bin/bash -c '/usr/bin/fc-cache --force; if ! /usr/bin/fc-list | grep -qi "Noto Serif"; then echo "fc-cache-boot: /usr/share/fonts not materialized; removing poisoned cache so readers rescan live" >&2; rm -f /var/cache/fontconfig/*; fi'
+# Bounded so a hung fc-cache cannot sit in front of display-manager.service for
+# the 90s default on every boot.
+TimeoutStartSec=120
+# Logic lives in a real script, not an inline `bash -c`: the previous one-liner
+# nested three levels of quoting and was one edit away from silently breaking.
+ExecStart=/usr/libexec/bluefin-udx/fc-cache-boot.sh
 
 [Install]
 WantedBy=multi-user.target

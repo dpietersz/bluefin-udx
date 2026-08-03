@@ -159,32 +159,77 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     fi
     echo "  ok    polkit rule shipped"
 
-    echo "Fontconfig emoji cache:"
-    if fc-list | grep -qi "Noto Color Emoji"; then echo "  ok    fc-list Noto Color Emoji"; else echo "  MISS  fc-list Noto Color Emoji"; FAIL=1; fi
-    if fc-match emoji | grep -q "Noto Color Emoji"; then echo "  ok    fc-match emoji"; else echo "  MISS  fc-match emoji"; FAIL=1; fi
-    # Guarded runtime fix: writable shared cachedir + verified boot rebuild.
-    # Under composefs an fc-cache run before /usr/share/fonts materialises writes
-    # a valid-but-empty cache that validates forever, hiding real serif fonts so
-    # Chromium/Electron pick a Nerd Font for `serif`. fc-cache-boot.service does a
-    # guarded rebuild into /var/cache/fontconfig before the DM (verifies a canary
-    # font, deletes the cache if empty so it can never poison). The authoritative
-    # repair is the user-scope fontconfig-heal.sh in dotfiles.
+    # Fontconfig. ALWAYS use /usr/bin/fc-* explicitly: on a dev host, Homebrew
+    # fontconfig 2.18 sits first on PATH, reads its OWN fonts.conf, cannot read
+    # the system cache-9 files, and reports HEALTHY while the system fontconfig
+    # (the one Helium/Electron link) sees zero fonts. A bare fc-list here would
+    # be a green light on a broken image.
+    #
+    # NOTE: this block runs inside a single-quoted run -c wrapper. Use ONLY
+    # double quotes. No apostrophes in comments either - they break the wrapper.
+    echo "Fontconfig - fonts actually resolvable:"
+    if /usr/bin/fc-list | grep -qi "Noto Color Emoji"; then echo "  ok    fc-list Noto Color Emoji"; else echo "  MISS  fc-list Noto Color Emoji"; FAIL=1; fi
+    if /usr/bin/fc-match emoji | grep -q "Noto Color Emoji"; then echo "  ok    fc-match emoji"; else echo "  MISS  fc-match emoji"; FAIL=1; fi
+    # BEHAVIOURAL checks, not presence checks. The old gate asserted only emoji and
+    # would have passed green with every serif font on the machine invisible -
+    # precisely the failure that shipped. "Noto Serif" is the canary that both
+    # fc-cache-boot.sh and rebuild-font-cache.sh depend on, so assert it here or
+    # those guards silently self-disable if the base image ever drops it.
+    if /usr/bin/fc-list | grep -qi "Noto Serif"; then echo "  ok    fc-list Noto Serif (canary present)"; else echo "  MISS  fc-list Noto Serif - fc-cache-boot canary would wipe the cache every boot"; FAIL=1; fi
+    if /usr/bin/fc-list | grep -q "^/usr/share/fonts"; then echo "  ok    /usr/share/fonts contributes fonts"; else echo "  MISS  /usr/share/fonts contributes ZERO fonts"; FAIL=1; fi
+    # The user-visible symptom: with system fonts invisible, generic serif loses to
+    # a Nerd Font by glyph coverage and Chromium renders a monospace for serif.
+    if /usr/bin/fc-match serif | grep -qi "nerd font"; then
+        echo "  MISS  fc-match serif resolves to a Nerd Font (monospace) - system fonts are hidden"; FAIL=1
+    else
+        echo "  ok    fc-match serif is not a Nerd Font"
+    fi
+
+    # Container-collision fix. distrobox shares $HOME, so ~/.cache/fontconfig is
+    # shared with every toolbox; fontconfig keys caches on md5(dir path) and
+    # /usr/share/fonts means something different inside an Ubuntu box. Cachedir
+    # ORDER cannot save us (conf.d is included before the cachedir block, so
+    # /var/cache/fontconfig can only be FIRST, and first loses). The fix is the
+    # epoch stamp, which triggers the fontconfig OSTree branch in FcCacheTimeValid
+    # and wins from any position. See fc-cache-boot.sh for the evidence table.
+    echo "Fontconfig - container-collision hardening:"
     check_file /etc/fonts/conf.d/05-bluefin-writable-cache.conf
     check_file /usr/lib/tmpfiles.d/fontconfig-var-cache.conf
     check_file /usr/lib/systemd/system/fc-cache-boot.service
-    if grep -q "/var/cache/fontconfig" /etc/fonts/conf.d/05-bluefin-writable-cache.conf; then
-        echo "  ok    /var/cache/fontconfig registered as cachedir"
+    check_file /usr/libexec/bluefin-udx/fc-cache-boot.sh
+    if [ -x /usr/libexec/bluefin-udx/fc-cache-boot.sh ]; then
+        echo "  ok    fc-cache-boot.sh is executable"
     else
-        echo "  MISS  /var/cache/fontconfig cachedir not registered"; FAIL=1
+        echo "  MISS  fc-cache-boot.sh not executable - unit would fail at boot"; FAIL=1
     fi
-    # Service must be enabled (wants symlink present) so it actually runs at boot.
-    if systemctl is-enabled fc-cache-boot.service >/dev/null 2>&1 \
-        || ls /etc/systemd/system/multi-user.target.wants/fc-cache-boot.service \
-              /usr/lib/systemd/system/multi-user.target.wants/fc-cache-boot.service >/dev/null 2>&1; then
-        echo "  ok    fc-cache-boot.service enabled"
+    # Assert the actual cachedir ELEMENT, not just the string: the file header
+    # comment mentions the path a dozen times, so a substring grep passed even
+    # when the element itself was absent.
+    if grep -q "<cachedir>/var/cache/fontconfig</cachedir>" /etc/fonts/conf.d/05-bluefin-writable-cache.conf; then
+        echo "  ok    /var/cache/fontconfig cachedir element present"
     else
-        echo "  MISS  fc-cache-boot.service not enabled"; FAIL=1
+        echo "  MISS  /var/cache/fontconfig cachedir element missing"; FAIL=1
     fi
+    # The epoch stamp IS the fix - assert it is actually still in the script.
+    if grep -q "touch -d @0" /usr/libexec/bluefin-udx/fc-cache-boot.sh; then
+        echo "  ok    boot script epoch-stamps the cache"
+    else
+        echo "  MISS  boot script no longer epoch-stamps - container-collision fix is GONE"; FAIL=1
+    fi
+    # The baked cache must survive into the image. It used to land in /var and be
+    # deleted by post_build.sh, making the build-time bake a silent no-op.
+    if ls /usr/lib/fontconfig/cache/*.cache-* >/dev/null 2>&1; then
+        echo "  ok    baked cache present in /usr/lib/fontconfig/cache"
+    else
+        echo "  MISS  /usr/lib/fontconfig/cache has no cache files - build-time bake was a no-op"; FAIL=1
+    fi
+    # Version coupling: the epoch trick is verified on fontconfig 2.17. On 2.18 the
+    # selection rule changes to newest-mtime-wins. Warn loudly on a major bump.
+    FC_VER=$(/usr/bin/fc-cache --version 2>&1 | grep -oE "[0-9]+[.][0-9]+" | head -1)
+    case "$FC_VER" in
+        2.17|2.16|2.15) echo "  ok    fontconfig $FC_VER (epoch-stamp behaviour verified)" ;;
+        *) echo "  WARN  fontconfig $FC_VER - epoch-stamp fix verified on 2.17 only; RE-VERIFY (see fc-cache-boot.sh caveat)" ;;
+    esac
 
     # NVIDIA variant adds nvtop. CUDA toolkit intentionally not baked —
     # incompatible with atomic /usr/local redirect; use nvidia/cuda containers

@@ -276,9 +276,41 @@ jobs:
             fi
             echo "  ok    polkit rule shipped"
 
-            echo "Fontconfig emoji cache:"
-            if fc-list | grep -qi "Noto Color Emoji"; then echo "  ok    fc-list Noto Color Emoji"; else echo "  MISS  fc-list Noto Color Emoji"; FAIL=1; fi
-            if fc-match emoji | grep -q "Noto Color Emoji"; then echo "  ok    fc-match emoji"; else echo "  MISS  fc-match emoji"; FAIL=1; fi
+            # Fontconfig. Pin /usr/bin/fc-* — a bare fc-list can resolve to a
+            # different fontconfig that reads a different cache set and reports
+            # healthy on a broken image.
+            echo "Fontconfig - fonts actually resolvable:"
+            if /usr/bin/fc-list | grep -qi "Noto Color Emoji"; then echo "  ok    fc-list Noto Color Emoji"; else echo "  MISS  fc-list Noto Color Emoji"; FAIL=1; fi
+            if /usr/bin/fc-match emoji | grep -q "Noto Color Emoji"; then echo "  ok    fc-match emoji"; else echo "  MISS  fc-match emoji"; FAIL=1; fi
+            # BEHAVIOURAL, not presence. This gate previously asserted emoji only
+            # and would have passed green with every serif font invisible - which
+            # is exactly the bug that shipped. "Noto Serif" is the canary that
+            # fc-cache-boot.sh and rebuild-font-cache.sh both depend on.
+            if /usr/bin/fc-list | grep -qi "Noto Serif"; then echo "  ok    fc-list Noto Serif (canary present)"; else echo "  MISS  fc-list Noto Serif - fc-cache-boot canary would wipe the cache every boot"; FAIL=1; fi
+            if /usr/bin/fc-list | grep -q "^/usr/share/fonts"; then echo "  ok    /usr/share/fonts contributes fonts"; else echo "  MISS  /usr/share/fonts contributes ZERO fonts"; FAIL=1; fi
+            if /usr/bin/fc-match serif | grep -qi "nerd font"; then
+                echo "  MISS  fc-match serif resolves to a Nerd Font (monospace) - system fonts hidden"; FAIL=1
+            else
+                echo "  ok    fc-match serif is not a Nerd Font"
+            fi
+            # Container-collision fix (distrobox shares $HOME -> shared
+            # ~/.cache/fontconfig; fontconfig keys caches on md5(dir path)).
+            # The epoch stamp is the fix - assert it is still present.
+            check_file /usr/libexec/bluefin-udx/fc-cache-boot.sh
+            if grep -q "touch -d @0" /usr/libexec/bluefin-udx/fc-cache-boot.sh; then
+                echo "  ok    boot script epoch-stamps the cache"
+            else
+                echo "  MISS  boot script no longer epoch-stamps - container-collision fix is GONE"; FAIL=1
+            fi
+            if ls /usr/lib/fontconfig/cache/*.cache-* >/dev/null 2>&1; then
+                echo "  ok    baked cache present in /usr/lib/fontconfig/cache"
+            else
+                echo "  MISS  /usr/lib/fontconfig/cache empty - build-time bake was a no-op"; FAIL=1
+            fi
+            # NOTE: this smoke test runs in a plain OCI container, NOT composefs,
+            # and has no shared $HOME - so it structurally CANNOT reproduce the
+            # container-poisoning bug itself. These are shipped-artifact assertions
+            # only. Real behavioural verification happens on the booted host.
 
             # NVIDIA variant adds nvtop. CUDA toolkit not baked — use
             # nvidia/cuda containers per project (atomic /usr/local quirk).
