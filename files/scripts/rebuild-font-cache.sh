@@ -29,7 +29,15 @@
 # any cachedir position — including against a cache a distrobox container writes
 # into the shared ~/.cache/fontconfig.
 
-set -uo pipefail
+# NO pipefail, and this is not an oversight. The canary check below pipes
+# `fc-list | grep -qi`; grep -q exits on the first match and closes the pipe,
+# fc-list then dies with SIGPIPE (141), and under pipefail the whole pipeline
+# reports failure EVEN WHEN THE CANARY WAS FOUND. That inverts the check, takes
+# the error branch, and fails the image build with the font cache in perfect
+# shape. Verified: with 135 Noto Serif faces present, `set -uo pipefail` takes
+# the error branch and `set -u` takes the ok branch. Same trap is documented in
+# the dotfiles fontconfig-heal.sh header — and I still walked into it here.
+set -u
 
 CACHE_DIR=/usr/lib/fontconfig/cache
 CANARY="Noto Serif"
