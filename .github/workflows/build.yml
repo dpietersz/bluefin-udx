@@ -51,6 +51,41 @@ jobs:
         run: df -h /
 
       # ----------------------------------------------------------------------
+      # GitHub runner image 20260810.271.1 replaced Ubuntu's Podman 4.9.3 with
+      # a third-party static Podman 5.8.4 bundle in /usr/local/bin. On these
+      # large bootc images it made every layer commit take 12-13 minutes, then
+      # corrupted the image rpmdb ("database disk image is malformed" / rpm
+      # transaction error -1). Both matrix legs passed on the old runner and
+      # failed as each received the new runner during its staged rollout.
+      # Restore Ubuntu's distro Podman, which was the known-good build engine.
+      # Remove static runtime/config files too: distro Podman otherwise finds
+      # the bundle's /usr/local/lib/podman/conmon before /usr/bin/conmon.
+      # ----------------------------------------------------------------------
+      - name: Use Ubuntu distro Podman
+        run: |
+          set -euo pipefail
+          sudo rm -f /usr/local/bin/{podman,pasta,pasta.avx2,fuse-overlayfs,crun,fusermount3,runc}
+          sudo rm -rf /usr/local/lib/podman /usr/local/libexec/podman
+          sudo rm -f /etc/containers/{storage.conf,containers.conf,seccomp.json}
+          sudo rm -f /etc/containers/containers.conf.d/00-fix-runtime.conf
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends podman
+          hash -r
+          if [ "$(command -v podman)" != "/usr/bin/podman" ]; then
+            echo "::error::Expected distro Podman at /usr/bin/podman, got $(command -v podman)"
+            exit 1
+          fi
+          podman --version
+          PODMAN_INFO=$(sudo podman info \
+            --format 'runtime={{.Host.OCIRuntime.Path}} conmon={{.Host.Conmon.Path}} storage={{.Store.GraphDriverName}}')
+          echo "$PODMAN_INFO"
+          if [[ "$PODMAN_INFO" != *"runtime=/usr/bin/crun"* ||
+                "$PODMAN_INFO" != *"conmon=/usr/bin/conmon"* ]]; then
+            echo "::error::Distro Podman is still using a static-bundle component"
+            exit 1
+          fi
+
+      # ----------------------------------------------------------------------
       # Install bluebuild CLI directly so we can drive build/push as separate
       # steps and insert a smoke-boot gate between them.
       # ----------------------------------------------------------------------
@@ -67,7 +102,7 @@ jobs:
       # ----------------------------------------------------------------------
       # BUILD LOCALLY — no push, no sign.
       # `bluebuild generate` emits a plain Containerfile. We build it with
-      # rootful `sudo podman build --jobs=1`, replacing the previous
+      # rootful distro `sudo podman build --jobs=1`, replacing the previous
       # `docker buildx --load` path which exhausted the runner's 16 GB RAM
       # ceiling on the bluefin-udx-nvidia leg (buildkit holds parallel
       # stages + the entire image in memory during --load materialization).
