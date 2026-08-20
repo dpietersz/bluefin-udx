@@ -54,11 +54,29 @@ Quarterly checks:
 - [ ] List packages baked but **not launched in the last 90 days** (rough proxy: when did you last open the app?).
 - [ ] Candidates → consider moving to `common-toolbox` (distrobox) or removing entirely.
 
-### 7. Bluefin-DX base image cadence
+### 7. GitHub runner container tooling
+
+The build host is not a stable dependency. `actions/runner-images` has broken this repo's nightly three times in three months, always by changing the container stack under us, and always with a staged rollout that makes the same commit pass and fail minutes apart. Treat it as a supply-chain source like any COPR.
+
+- [ ] Skim the last quarter's Ubuntu 24.04 image release notes for **Podman / crun / conmon / buildah / skopeo / fuse-overlayfs** rows: https://github.com/actions/runner-images/releases
+- [ ] Confirm the `Pin Podman to the distro build on kernel overlay` step in `build.yml` still holds. Its assertions are the canary:
+  - `fuse-overlayfs` must not resolve on `PATH`
+  - `/var/lib/containers/storage/overlay/.has-mount-program` must not read `true`
+  - runtime `/usr/bin/crun`, conmon `/usr/bin/conmon`, driver `overlay`
+- [ ] If GitHub drops the fuse-overlayfs binary (tracked in actions/runner-images#14597) the removals become no-ops and can eventually be retired — but only after a green build proves the graphroot is no longer pre-seeded.
+
+**Do not assert `Native Overlay Diff: true` or read `GraphOptions` to detect this.** Both are blind to it: `GraphOptions` is empty when the mount program is auto-detected rather than configured, and `Native Overlay Diff` reads `false` on these runners even on a healthy kernel-overlay build. Measured on both the slow and fast paths in probe run 32368262988.
+
+Background, if this ever regresses:
+- containers/fuse-overlayfs#475 — silent rpmdb SQLite corruption on Fedora bootc builds
+- actions/runner-images#14597 — the image change that introduced fuse-overlayfs 1.16
+- Symptom pair to recognise: `database disk image is malformed` / `Error -1 running transaction`, **or** a uniform ~11 min per layer commit regardless of what the layer does. Both mean the same thing.
+
+### 8. Bluefin-DX base image cadence
 - [ ] Is `bluefin-dx:stable` still the right channel? If you've been on `:latest` mentally but `:stable` in recipe, reconcile.
 - [ ] Major Fedora version bump coming? Add to the next review's agenda.
 
-### 8. macOS reality check
+### 9. macOS reality check
 - [ ] Did anything in `dotfiles/.chezmoiscripts/run_once_before_01b-install-homebrew-packages.sh.tmpl` need a corresponding Linux update that didn't land?
 - [ ] Goal: macOS and Linux deliver the same developer experience modulo OS-specific apps.
 
