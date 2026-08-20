@@ -1,0 +1,160 @@
+name: probe-storage
+
+# TEMPORARY diagnostic. Delete once the build.yml storage fix is verified.
+#
+# Answers three questions that cannot be answered from build logs:
+#   1. Does the runner image ship a pre-poisoned rootful graphroot
+#      (/var/lib/containers/storage/overlay/.has-mount-program == "true",
+#      or residual user.fuseoverlayfs.* xattrs)?
+#   2. Does /usr/bin/fuse-overlayfs exist alongside /usr/local/bin/fuse-overlayfs?
+#   3. Is the ~700s-per-layer-commit floor caused by mount_program forcing
+#      naive diff (containers/storage useNaiveDiff), or by something else?
+#
+# Measures a single trivial layer commit on a real bootc base under two
+# treatments: the current 7c68db3 treatment, then the proposed Phase-1 fix.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Probe podman storage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: A. Pristine runner facts (no podman invoked yet)
+        run: |
+          set +e
+          echo "::group::runner image"
+          cat /imagegeneration/imagedata.json 2>/dev/null | head -20
+          uname -r
+          echo "::endgroup::"
+
+          echo "::group::fuse-overlayfs binaries"
+          for p in /usr/bin/fuse-overlayfs /usr/local/bin/fuse-overlayfs; do
+            if [ -e "$p" ]; then echo "PRESENT $p -> $("$p" --version 2>&1 | head -1)"; else echo "ABSENT  $p"; fi
+          done
+          command -v fuse-overlayfs
+          echo "::endgroup::"
+
+          echo "::group::storage.conf files"
+          for f in /etc/containers/storage.conf /usr/share/containers/storage.conf; do
+            if [ -e "$f" ]; then
+              echo "--- $f ---"
+              grep -vE '^\s*#|^\s*$' "$f"
+            else
+              echo "--- $f : ABSENT ---"
+            fi
+          done
+          echo "::endgroup::"
+
+          echo "::group::rootful graphroot state (THE key question)"
+          sudo ls -la /var/lib/containers/storage/ 2>&1 | head -20
+          echo "--- overlay dir ---"
+          sudo ls -la /var/lib/containers/storage/overlay/ 2>&1 | head -20
+          echo "--- .has-mount-program ---"
+          sudo cat /var/lib/containers/storage/overlay/.has-mount-program 2>&1
+          echo ""
+          echo "--- layer count ---"
+          sudo find /var/lib/containers/storage/overlay -maxdepth 1 -type d 2>/dev/null | wc -l
+          echo "--- fuse xattrs anywhere in graphroot ---"
+          sudo getfattr -R -d -m 'user\.(fuseoverlayfs|containers)\.' \
+            /var/lib/containers/storage/overlay 2>/dev/null | head -20
+          echo "--- whiteouts ---"
+          sudo find /var/lib/containers/storage/overlay -name '.wh.*' 2>/dev/null | head -5
+          echo "::endgroup::"
+
+          echo "::group::podman as shipped"
+          command -v podman; podman --version
+          echo "::endgroup::"
+          exit 0
+
+      - name: B. Apply CURRENT treatment (7c68db3) and report
+        run: |
+          set +e
+          sudo rm -f /usr/local/bin/{podman,pasta,pasta.avx2,fuse-overlayfs,crun,fusermount3,runc}
+          sudo rm -rf /usr/local/lib/podman /usr/local/libexec/podman
+          sudo rm -f /etc/containers/{storage.conf,containers.conf,seccomp.json}
+          sudo rm -f /etc/containers/containers.conf.d/00-fix-runtime.conf
+          sudo apt-get update -qq
+          sudo apt-get install --yes --no-install-recommends podman
+          hash -r
+          podman --version
+
+          echo "::group::fuse-overlayfs after current treatment"
+          command -v fuse-overlayfs || echo "not on PATH"
+          echo "::endgroup::"
+
+          echo "::group::VERDICT — current treatment"
+          sudo podman info --format 'driver={{.Store.GraphDriverName}}'
+          sudo podman info --format 'graphopts={{.Store.GraphOptions}}'
+          sudo podman info --format 'status={{.Store.GraphStatus}}'
+          sudo podman info --format 'nativediff={{index .Store.GraphStatus "Native Overlay Diff"}}'
+          echo "--- flag file now ---"
+          sudo cat /var/lib/containers/storage/overlay/.has-mount-program 2>&1
+          echo "::endgroup::"
+          exit 0
+
+      - name: C. Time one trivial layer commit — CURRENT treatment
+        run: |
+          set +e
+          cat > /tmp/Probe.Containerfile <<'EOF'
+          FROM ghcr.io/ublue-os/bluefin-dx:latest
+          RUN mkdir -p /etc/pki/probe && echo probe > /etc/pki/probe/marker
+          EOF
+          echo "pulling base (not timed)…"
+          sudo podman pull ghcr.io/ublue-os/bluefin-dx:latest >/dev/null 2>&1
+          echo "base pulled, timing single-layer build…"
+          START=$(date +%s)
+          sudo podman build --jobs=1 -t localhost/probe-current -f /tmp/Probe.Containerfile /tmp
+          END=$(date +%s)
+          echo "::notice::CURRENT treatment — trivial layer commit took $((END-START))s"
+          echo "CURRENT_SECONDS=$((END-START))" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: D. Apply PROPOSED fix (Phase 1) and report
+        run: |
+          set +e
+          echo "::group::wipe graphroot + remove BOTH fuse-overlayfs"
+          sudo rm -rf /var/lib/containers/storage
+          sudo rm -f /usr/bin/fuse-overlayfs /usr/local/bin/fuse-overlayfs
+          command -v fuse-overlayfs || echo "fuse-overlayfs gone from PATH"
+          echo "::endgroup::"
+
+          echo "::group::write our own storage.conf"
+          sudo mkdir -p /etc/containers
+          sudo tee /etc/containers/storage.conf >/dev/null <<'EOF'
+          [storage]
+          driver = "overlay"
+          runroot = "/run/containers/storage"
+          graphroot = "/var/lib/containers/storage"
+
+          [storage.options.overlay]
+          mountopt = "nodev"
+          EOF
+          cat /etc/containers/storage.conf
+          echo "::endgroup::"
+
+          echo "::group::VERDICT — proposed fix"
+          sudo podman info --format 'driver={{.Store.GraphDriverName}}'
+          sudo podman info --format 'graphopts={{.Store.GraphOptions}}'
+          sudo podman info --format 'status={{.Store.GraphStatus}}'
+          sudo podman info --format 'nativediff={{index .Store.GraphStatus "Native Overlay Diff"}}'
+          echo "--- flag file now ---"
+          sudo cat /var/lib/containers/storage/overlay/.has-mount-program 2>&1
+          echo "::endgroup::"
+          exit 0
+
+      - name: E. Time one trivial layer commit — PROPOSED fix
+        run: |
+          set +e
+          echo "pulling base (not timed)…"
+          sudo podman pull ghcr.io/ublue-os/bluefin-dx:latest >/dev/null 2>&1
+          echo "base pulled, timing single-layer build…"
+          START=$(date +%s)
+          sudo podman build --jobs=1 -t localhost/probe-fixed -f /tmp/Probe.Containerfile /tmp
+          END=$(date +%s)
+          echo "::notice::PROPOSED fix — trivial layer commit took $((END-START))s"
+          echo "::notice::COMPARISON current=${CURRENT_SECONDS}s proposed=$((END-START))s"
+          exit 0
