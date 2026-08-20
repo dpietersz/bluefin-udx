@@ -27,6 +27,10 @@ jobs:
   build:
     name: Build ${{ matrix.recipe }}
     runs-on: ubuntu-24.04
+    # A green build is ~20 min. The default 6h ceiling let the 2026-08-20 run
+    # burn a full six hours on one leg before reporting; cap it so a storage or
+    # toolchain regression costs minutes, not a whole night.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -51,31 +55,96 @@ jobs:
         run: df -h /
 
       # ----------------------------------------------------------------------
-      # GitHub runner image 20260810.271.1 replaced Ubuntu's Podman 4.9.3 with
-      # a third-party static Podman 5.8.4 bundle in /usr/local/bin. On these
-      # large bootc images it made every layer commit take 12-13 minutes, then
-      # corrupted the image rpmdb ("database disk image is malformed" / rpm
-      # transaction error -1). Both matrix legs passed on the old runner and
-      # failed as each received the new runner during its staged rollout.
-      # Restore Ubuntu's distro Podman, which was the known-good build engine.
-      # Remove static runtime/config files too: distro Podman otherwise finds
-      # the bundle's /usr/local/lib/podman/conmon before /usr/bin/conmon.
+      # Runner image 20260810.271.1 replaced Ubuntu's Podman 4.9.3 with a
+      # third-party static Podman 5.8.4 bundle (mgoltzsche/podman-static). The
+      # bundle untars its own /etc over the host, landing a storage.conf with:
+      #     mount_program = "/usr/local/bin/fuse-overlayfs"
+      #     mountopt      = "nodev,fsync=0"
+      # That is graphroot-wide, so it hits ROOTFUL podman too. Two consequences,
+      # both fatal for a bootc build:
+      #
+      #  1. containers/storage sets useNaiveDiffOnly as soon as a mount_program
+      #     is in play, and every layer then commits through FUSE. Measured by
+      #     this repo's own probe workflow (run 32368262988): ONE trivial layer
+      #     on a bluefin-dx base took 663s through fuse-overlayfs vs 66s on
+      #     kernel overlay. Across 34 layers x 3 build attempts, that is the six
+      #     hours the 2026-08-20 nightly burned before being killed.
+      #  2. fuse-overlayfs 1.16 (predates the 1.17 "st_ino must be unique" fix)
+      #     plus fsync=0 intermittently corrupts the ~90 MB rpmdb.sqlite
+      #     inherited from the base image, surfacing as "database disk image is
+      #     malformed" / "Error -1 running transaction". Same signature and same
+      #     Fedora-bootc workload as containers/fuse-overlayfs#475 and
+      #     actions/runner-images#14597.
+      #
+      # Deleting the bundle is NOT sufficient, and configuration alone CANNOT
+      # fix this. Two independent routes lead back to FUSE:
+      #   - /usr/bin/fuse-overlayfs ships on the image as well, and
+      #     overlay.Init() resolves it with a bare exec.LookPath(), no path
+      #     constraint. Removing only the /usr/local/bin copy (which is what the
+      #     first attempt at this fix did) leaves that one in place.
+      #   - the VM image ships a graphroot already initialised under the bundle
+      #     config. /var/lib/containers/storage/overlay/.has-mount-program is
+      #     baked in reading "true", and SupportsNativeOverlay() honours that
+      #     file and returns false WITHOUT probing the kernel, so podman
+      #     re-adopts fuse-overlayfs from PATH. Verified on a pristine runner:
+      #     the file exists, says "true", and is dated to the image bake.
+      #
+      # Hence: remove BOTH fuse-overlayfs copies, wipe the graphroot, and write
+      # our own storage.conf rather than inheriting whatever the next runner
+      # image ships. Ordering matters -- the wipe must precede the first podman
+      # call, because `podman info` itself initialises the graphroot and would
+      # re-record the flag.
+      #
+      # Distro Podman is kept because 4.9.3 + crun 1.14.1 + kernel overlay is
+      # the stack every green build through 2026-08-12 used. The bundle's
+      # runtime/config files must go with it: distro Podman otherwise finds the
+      # bundle's /usr/local/lib/podman/conmon before /usr/bin/conmon, and
+      # 00-fix-runtime.conf pins crun to a /usr/local/bin path we just deleted.
       # ----------------------------------------------------------------------
-      - name: Use Ubuntu distro Podman
+      - name: Pin Podman to the distro build on kernel overlay
         run: |
           set -euo pipefail
-          sudo rm -f /usr/local/bin/{podman,pasta,pasta.avx2,fuse-overlayfs,crun,fusermount3,runc}
+
+          # Remove the static bundle and every config file it planted.
+          sudo rm -f /usr/local/bin/{podman,pasta,pasta.avx2,crun,fusermount3,runc}
           sudo rm -rf /usr/local/lib/podman /usr/local/libexec/podman
           sudo rm -f /etc/containers/{storage.conf,containers.conf,seccomp.json}
           sudo rm -f /etc/containers/containers.conf.d/00-fix-runtime.conf
+
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends podman
           hash -r
+
+          # Close both routes back to FUSE. Done AFTER apt so a fuse-overlayfs
+          # pulled in as a dependency is caught too; leaving the package
+          # installed is fine, LookPath only cares about the binary.
+          sudo rm -f /usr/local/bin/fuse-overlayfs /usr/bin/fuse-overlayfs
+          sudo rm -rf /var/lib/containers/storage /run/containers/storage
+
+          # Pin storage explicitly instead of inheriting the distro default
+          # from /usr/share/containers/storage.conf.
+          sudo mkdir -p /etc/containers
+          sudo tee /etc/containers/storage.conf >/dev/null <<'EOF'
+          [storage]
+          driver = "overlay"
+          runroot = "/run/containers/storage"
+          graphroot = "/var/lib/containers/storage"
+
+          [storage.options.overlay]
+          mountopt = "nodev"
+          EOF
+
           if [ "$(command -v podman)" != "/usr/bin/podman" ]; then
             echo "::error::Expected distro Podman at /usr/bin/podman, got $(command -v podman)"
             exit 1
           fi
           podman --version
+
+          if command -v fuse-overlayfs >/dev/null 2>&1; then
+            echo "::error::fuse-overlayfs still resolvable at $(command -v fuse-overlayfs) - overlay.Init would re-adopt it"
+            exit 1
+          fi
+
           PODMAN_INFO=$(sudo podman info \
             --format 'runtime={{.Host.OCIRuntime.Path}} conmon={{.Host.Conmon.Path}} storage={{.Store.GraphDriverName}}')
           echo "$PODMAN_INFO"
@@ -84,6 +153,24 @@ jobs:
             echo "::error::Distro Podman is still using a static-bundle component"
             exit 1
           fi
+          if [[ "$PODMAN_INFO" != *"storage=overlay"* ]]; then
+            echo "::error::Expected the overlay storage driver - got: $PODMAN_INFO"
+            exit 1
+          fi
+
+          # The decisive assertion, and the reason it is a file read rather than
+          # a podman info field: no info field can see this. GraphOptions stays
+          # EMPTY when the mount program is auto-detected rather than configured,
+          # and "Native Overlay Diff" reads false on these runners even on a
+          # healthy kernel-overlay build -- probe run 32368262988 measured false
+          # on both the 663s path and the 66s path, so asserting it would fail a
+          # correct build. The flag file is the only direct signal.
+          FLAG=/var/lib/containers/storage/overlay/.has-mount-program
+          if [ -e "$FLAG" ] && [ "$(sudo cat "$FLAG")" = "true" ]; then
+            echo "::error::containers/storage adopted a mount program - build would run through fuse-overlayfs"
+            exit 1
+          fi
+          echo "storage: kernel overlay, no mount program"
 
       # ----------------------------------------------------------------------
       # Install bluebuild CLI directly so we can drive build/push as separate
@@ -92,10 +179,14 @@ jobs:
       - name: Install bluebuild CLI
         run: |
           set -euo pipefail
+          # sudo throughout: the build below is rootful, and running this one
+          # step rootless would spin up a SECOND graphroot under $HOME with its
+          # own storage config and its own .has-mount-program state, outside
+          # every assertion made above. One store, one set of guarantees.
           INSTALLER_IMG="ghcr.io/blue-build/cli:latest-installer"
-          CID=$(podman create "$INSTALLER_IMG" /bin/true)
-          podman cp "$CID:/out/bluebuild" /tmp/bluebuild
-          podman rm "$CID" >/dev/null
+          CID=$(sudo podman create "$INSTALLER_IMG" /bin/true)
+          sudo podman cp "$CID:/out/bluebuild" /tmp/bluebuild
+          sudo podman rm "$CID" >/dev/null
           sudo install -m 0755 /tmp/bluebuild /usr/local/bin/bluebuild
           bluebuild --version
 
@@ -227,6 +318,18 @@ jobs:
             check_rpm() {
                 if rpm -q "$1" >/dev/null 2>&1; then echo "  ok    rpm $1"; else echo "  MISS  rpm $1"; FAIL=1; fi
             }
+            # rpmdb integrity, asserted BEFORE anything that depends on it.
+            # Independent of any build-host theory: a storage layer that
+            # silently scrambles the inherited ~90 MB rpmdb.sqlite still yields
+            # a buildable image, and every check_rpm below would then report
+            # MISS for a reason that has nothing to do with the recipe. Fail
+            # here so the error names itself. See containers/fuse-overlayfs#475.
+            echo "rpm database integrity:"
+            if ! rpm -qa > /dev/null 2>&1; then
+                echo "  FAIL: rpmdb unreadable - image is corrupt, refusing to push"
+                exit 1
+            fi
+            echo "  ok    rpmdb readable ($(rpm -qa | wc -l) packages)"
             echo "Phase 0 bootstrap binaries:"
             for bin in pass gpg age ssh git jq curl; do check_bin "$bin"; done
             # Bluefin /opt -> /var/opt (first-boot populated). Inside docker/podman
