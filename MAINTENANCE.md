@@ -32,10 +32,12 @@ A 4xx on any of these breaks the image build. Renovate is configured to flag thi
 
 **Standalone vendor artifacts (no package repository):**
 - [ ] Proton Authenticator — compare the first active stable x86_64 RPM in https://proton.me/download/authenticator/linux/version.json with `rpm -q proton-authenticator` on both laptops. Confirm URL remains under `https://proton.me/download/authenticator/linux/`, SHA-512 is still present, and package identity remains `proton-authenticator` / `x86_64`.
-- [ ] Re-check whether Proton now signs its RPM or offers a DNF repository. If so, replace the standalone unsigned-artifact flow with the signed repository. Until then, keep checksum and RPM identity validation in `files/scripts/install-proton-authenticator-latest.sh`.
+- [ ] Proton Mail — compare the first active `Stable` x86_64 RPM in https://proton.me/download/mail/linux/version.json with `rpm -q proton-mail` on both laptops. Never select `Alpha` or `EarlyAccess`; confirm URL remains a versioned `https://proton.me/download/mail/linux/<version>/ProtonMail-desktop-beta.rpm`, SHA-512 remains present, and `mailto:` handling remains in `proton-mail.desktop`.
+- [ ] Re-check whether Proton now signs either RPM or offers a DNF repository. If so, replace the corresponding standalone unsigned-artifact flow with the signed repository. Until then, keep checksum and RPM identity validation in both Proton installer scripts.
 - [ ] Launch Proton Authenticator on both laptops. Its desktop entry intentionally sets Proton's app-scoped `WEBKIT_DISABLE_DMABUF_RENDERER=1` workaround so WebKit renders reliably on the NVIDIA P14s; confirm the launcher patch survives package-layout changes and do not disable acceleration globally.
+- [ ] Launch Proton Mail on both laptops and verify notifications, `mailto:` links, Calendar navigation, and GPU rendering. Keep the vendor launcher unchanged unless a reproducible GPU failure requires an app-scoped workaround.
 
-The nightly workflow pre-resolves Proton's current URL and checksum into `build-pins.env`, so a new release changes the build context and refreshes both images automatically. A malformed or empty manifest must fail the build rather than silently retain an old package.
+The nightly workflow pre-resolves both Proton products' current stable URL and checksum into `build-pins.env`, so a new release changes the build context and refreshes both images automatically. A malformed or empty manifest must fail the build rather than silently retain an old package.
 
 ### 4. Upstream movement
 - [ ] Has Zen Browser stabilized enough to ship an official RPM? If yes, drop `sneexy/`.

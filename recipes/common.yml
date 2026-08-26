@@ -74,6 +74,18 @@ modules:
       - install-proton-authenticator-latest.sh
 
   # ---------------------------------------------------------------------------
+  # Proton Mail desktop (Mail + Calendar).
+  # Proton publishes an official Fedora/RHEL x86_64 RPM but no DNF repository.
+  # The installer selects only the newest active Stable release (never Alpha or
+  # EarlyAccess), verifies Proton's SHA-512, validates RPM identity, and installs
+  # it. CI pins the resolved metadata so new stable releases invalidate cache.
+  # Shared here so both Intel and NVIDIA images ship the same client.
+  # ---------------------------------------------------------------------------
+  - type: script
+    scripts:
+      - install-proton-mail-latest.sh
+
+  # ---------------------------------------------------------------------------
   # Client-side cosign verification for ghcr.io/dpietersz/* images.
   # Wires policy.json + registries.d so `rpm-ostree rebase ostree-image-signed:`
   # validates the image signature before deploying. The ghcr.io/dpietersz

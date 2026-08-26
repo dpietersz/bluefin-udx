@@ -110,6 +110,25 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     else
         echo "  ok    proton-authenticator shared libraries resolved"
     fi
+    echo "Proton Mail desktop:"
+    check_rpm proton-mail
+    check_bin proton-mail
+    check_file /usr/share/applications/proton-mail.desktop
+    check_file "/usr/lib/proton-mail/Proton Mail Beta"
+    check_file /usr/lib/proton-mail/chrome-sandbox
+    if ! grep -q "^MimeType=.*x-scheme-handler/mailto" /usr/share/applications/proton-mail.desktop; then
+        echo "  FAIL: proton-mail desktop entry lost mailto handling"
+        FAIL=1
+    else
+        echo "  ok    proton-mail mailto handler"
+    fi
+    if ldd "/usr/lib/proton-mail/Proton Mail Beta" 2>&1 | grep -q "not found"; then
+        echo "  FAIL: proton-mail has unresolved shared libraries"
+        ldd "/usr/lib/proton-mail/Proton Mail Beta" 2>&1 | grep "not found" || true
+        FAIL=1
+    else
+        echo "  ok    proton-mail shared libraries resolved"
+    fi
 
     echo "Baked GPG keys (insulate build from upstream key-host outages):"
     check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-terra-44

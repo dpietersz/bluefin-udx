@@ -204,8 +204,8 @@ jobs:
       # Pre-resolve external "latest" versions using GITHUB_TOKEN (1000 req/h
       # quota) BEFORE the build, write them to a pin file that the in-build
       # scripts (install-nwg-displays-latest.sh, install-paseo-latest.sh,
-      # install-proton-authenticator-latest.sh) can pick up from their bluebuild
-      # script/files mounts. This avoids the
+      # install-proton-authenticator-latest.sh, install-proton-mail-latest.sh)
+      # can pick up from their bluebuild script/files mounts. This avoids the
       # unauthenticated GitHub API rate limit (60/h per IP) hit on 2026-06-03 —
       # both matrix legs share the runner IP pool so the second leg's API calls
       # 403'd. Scripts still work locally without this file (falls back to
@@ -260,6 +260,34 @@ jobs:
             exit 1
           fi
 
+          # Proton Mail uses a separate manifest and rollout field. Select only
+          # Stable: the first entry can be Alpha or EarlyAccess even when a newer
+          # version number exists.
+          PROTON_MAIL_RELEASE=$(curl -fsSL --retry 5 --retry-all-errors \
+            https://proton.me/download/mail/linux/version.json \
+            | jq -r '
+                [
+                  .Releases[]
+                  | select(.CategoryName == "Stable" and (.RolloutProportion // 0) > 0)
+                  | . as $release
+                  | .File[]
+                  | select(.Identifier | startswith(".rpm"))
+                  | [$release.Version, .Url, .Sha512CheckSum]
+                ][0] // empty
+                | @tsv
+              ')
+          if [ -z "$PROTON_MAIL_RELEASE" ]; then
+            echo "::error::No active stable Proton Mail RPM in official manifest"
+            exit 1
+          fi
+          IFS=$'\t' read -r PROTON_MAIL_VERSION PROTON_MAIL_URL PROTON_MAIL_SHA512 <<< "$PROTON_MAIL_RELEASE"
+          if [[ ! "$PROTON_MAIL_VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ||
+                ! "$PROTON_MAIL_URL" =~ ^https://proton\.me/download/mail/linux/[0-9]+(\.[0-9]+)+/ProtonMail-desktop-beta\.rpm$ ||
+                ! "$PROTON_MAIL_SHA512" =~ ^[0-9a-fA-F]{128}$ ]]; then
+            echo "::error::Invalid Proton Mail version, URL, or SHA-512 in official manifest"
+            exit 1
+          fi
+
           # build-pins.env is sourced by build scripts. Shell-quote every value,
           # including existing GitHub-derived pins, so upstream metadata can
           # never inject syntax into that source operation.
@@ -269,6 +297,9 @@ jobs:
             printf 'PROTON_AUTHENTICATOR_VERSION=%q\n' "$PROTON_VERSION"
             printf 'PROTON_AUTHENTICATOR_RPM_URL=%q\n' "$PROTON_URL"
             printf 'PROTON_AUTHENTICATOR_SHA512=%q\n' "$PROTON_SHA512"
+            printf 'PROTON_MAIL_VERSION=%q\n' "$PROTON_MAIL_VERSION"
+            printf 'PROTON_MAIL_RPM_URL=%q\n' "$PROTON_MAIL_URL"
+            printf 'PROTON_MAIL_SHA512=%q\n' "$PROTON_MAIL_SHA512"
           } > files/scripts/build-pins.env
           echo "=== Pin file ==="
           cat files/scripts/build-pins.env
@@ -410,6 +441,25 @@ jobs:
                 FAIL=1
             else
                 echo "  ok    proton-authenticator shared libraries resolved"
+            fi
+            echo "Proton Mail desktop:"
+            check_rpm proton-mail
+            check_bin proton-mail
+            check_file /usr/share/applications/proton-mail.desktop
+            check_file "/usr/lib/proton-mail/Proton Mail Beta"
+            check_file /usr/lib/proton-mail/chrome-sandbox
+            if ! grep -q "^MimeType=.*x-scheme-handler/mailto" /usr/share/applications/proton-mail.desktop; then
+                echo "  FAIL: proton-mail desktop entry lost mailto handling"
+                FAIL=1
+            else
+                echo "  ok    proton-mail mailto handler"
+            fi
+            if ldd "/usr/lib/proton-mail/Proton Mail Beta" 2>&1 | grep -q "not found"; then
+                echo "  FAIL: proton-mail has unresolved shared libraries"
+                ldd "/usr/lib/proton-mail/Proton Mail Beta" 2>&1 | grep "not found" || true
+                FAIL=1
+            else
+                echo "  ok    proton-mail shared libraries resolved"
             fi
             echo "Baked GPG keys + .repo files (insulate build from upstream key-host outages):"
             check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-terra-44
