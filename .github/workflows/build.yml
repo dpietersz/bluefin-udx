@@ -203,8 +203,9 @@ jobs:
       # ----------------------------------------------------------------------
       # Pre-resolve external "latest" versions using GITHUB_TOKEN (1000 req/h
       # quota) BEFORE the build, write them to a pin file that the in-build
-      # scripts (install-nwg-displays-latest.sh, install-paseo-latest.sh) can
-      # pick up from their bluebuild script/files mounts. This avoids the
+      # scripts (install-nwg-displays-latest.sh, install-paseo-latest.sh,
+      # install-proton-authenticator-latest.sh) can pick up from their bluebuild
+      # script/files mounts. This avoids the
       # unauthenticated GitHub API rate limit (60/h per IP) hit on 2026-06-03 —
       # both matrix legs share the runner IP pool so the second leg's API calls
       # 403'd. Scripts still work locally without this file (falls back to
@@ -229,9 +230,45 @@ jobs:
             echo "::error::No getpaseo/paseo release exposes an x86_64.rpm asset — aborting before writing an empty pin"
             exit 1
           fi
+
+          # Proton ships no DNF repository. Resolve the newest active stable
+          # x86_64 RPM and its SHA-512 from the official manifest. Keeping these
+          # values in build-pins.env makes a Proton release change invalidate the
+          # cached script layer on the next nightly build.
+          PROTON_RELEASE=$(curl -fsSL --retry 5 --retry-all-errors \
+            https://proton.me/download/authenticator/linux/version.json \
+            | jq -r '
+                [
+                  .Releases[]
+                  | select(.CategoryName == "Stable" and (.RolloutPercentage // 0) > 0)
+                  | . as $release
+                  | .File[]
+                  | select(.Identifier | startswith(".rpm"))
+                  | [$release.Version, .Url, .Sha512CheckSum]
+                ][0] // empty
+                | @tsv
+              ')
+          if [ -z "$PROTON_RELEASE" ]; then
+            echo "::error::No active stable Proton Authenticator RPM in official manifest"
+            exit 1
+          fi
+          IFS=$'\t' read -r PROTON_VERSION PROTON_URL PROTON_SHA512 <<< "$PROTON_RELEASE"
+          if [[ ! "$PROTON_VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ||
+                ! "$PROTON_URL" =~ ^https://proton\.me/download/authenticator/linux/ProtonAuthenticator-[0-9]+(\.[0-9]+)+-[0-9]+\.x86_64\.rpm$ ||
+                ! "$PROTON_SHA512" =~ ^[0-9a-fA-F]{128}$ ]]; then
+            echo "::error::Invalid Proton Authenticator version, URL, or SHA-512 in official manifest"
+            exit 1
+          fi
+
+          # build-pins.env is sourced by build scripts. Shell-quote every value,
+          # including existing GitHub-derived pins, so upstream metadata can
+          # never inject syntax into that source operation.
           {
-            echo "NWG_DISPLAYS_TAG=${NWG_TAG}"
-            echo "PASEO_RPM_URL=${PASEO_URL}"
+            printf 'NWG_DISPLAYS_TAG=%q\n' "$NWG_TAG"
+            printf 'PASEO_RPM_URL=%q\n' "$PASEO_URL"
+            printf 'PROTON_AUTHENTICATOR_VERSION=%q\n' "$PROTON_VERSION"
+            printf 'PROTON_AUTHENTICATOR_RPM_URL=%q\n' "$PROTON_URL"
+            printf 'PROTON_AUTHENTICATOR_SHA512=%q\n' "$PROTON_SHA512"
           } > files/scripts/build-pins.env
           echo "=== Pin file ==="
           cat files/scripts/build-pins.env
@@ -357,6 +394,23 @@ jobs:
             done
             echo "Phase 3b GUI apps:"
             check_rpm beekeeper-studio
+            echo "Proton Authenticator:"
+            check_rpm proton-authenticator
+            check_bin proton-authenticator
+            check_file "/usr/share/applications/Proton Authenticator.desktop"
+            if grep -Eq "^Exec=env WEBKIT_DISABLE_DMABUF_RENDERER=1 proton-authenticator([[:space:]].*)?$" "/usr/share/applications/Proton Authenticator.desktop"; then
+                echo "  ok    app-scoped NVIDIA WebKit workaround"
+            else
+                echo "  FAIL  app-scoped NVIDIA WebKit workaround missing"
+                FAIL=1
+            fi
+            if ldd /usr/bin/proton-authenticator 2>&1 | grep -q "not found"; then
+                echo "  FAIL: proton-authenticator has unresolved shared libraries"
+                ldd /usr/bin/proton-authenticator 2>&1 | grep "not found" || true
+                FAIL=1
+            else
+                echo "  ok    proton-authenticator shared libraries resolved"
+            fi
             echo "Baked GPG keys + .repo files (insulate build from upstream key-host outages):"
             check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-terra-44
             check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-beekeeper-studio

@@ -93,6 +93,23 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     done
     echo "Phase 3b GUI apps:"
     check_rpm beekeeper-studio
+    echo "Proton Authenticator:"
+    check_rpm proton-authenticator
+    check_bin proton-authenticator
+    check_file "/usr/share/applications/Proton Authenticator.desktop"
+    if grep -Eq "^Exec=env WEBKIT_DISABLE_DMABUF_RENDERER=1 proton-authenticator([[:space:]].*)?$" "/usr/share/applications/Proton Authenticator.desktop"; then
+        echo "  ok    app-scoped NVIDIA WebKit workaround"
+    else
+        echo "  FAIL  app-scoped NVIDIA WebKit workaround missing"
+        FAIL=1
+    fi
+    if ldd /usr/bin/proton-authenticator 2>&1 | grep -q "not found"; then
+        echo "  FAIL: proton-authenticator has unresolved shared libraries"
+        ldd /usr/bin/proton-authenticator 2>&1 | grep "not found" || true
+        FAIL=1
+    else
+        echo "  ok    proton-authenticator shared libraries resolved"
+    fi
 
     echo "Baked GPG keys (insulate build from upstream key-host outages):"
     check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-terra-44

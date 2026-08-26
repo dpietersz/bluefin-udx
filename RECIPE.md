@@ -82,6 +82,14 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 
 User-layer config (`xdg-desktop-portal` config, OBS profile templated per machine via `.hasNvidia`, mic filter-chain scene collection, OBS plugin pack) lives in dotfiles at `dot_config/obs-studio/` and `.chezmoiscripts/run_onchange_after_18-install-obs-plugins.sh.tmpl`. Module autoload (`/etc/modules-load.d/v4l2loopback.conf`) and module options (`/etc/modprobe.d/v4l2loopback.conf`, `exclusive_caps=1` for Chromium-family camera pickers) are baked here as `files/system/` overlays because they're `/etc/` system scope, not `$HOME`.
 
+### Current standalone GUI package — Proton Authenticator
+
+| Package | Source | Maintained by | Why baked | Fallback if source dies | Last reviewed |
+|---|---|---|---|---|---|
+| `proton-authenticator` | Proton standalone Fedora/RHEL x86_64 RPM, resolved from official `version.json`; RPM is unsigned, so URL + SHA-512 are resolved together and verified before install | Proton AG | system-integration — replacement daily-driver authenticator; needs native GTK/WebKitGTK plus host Secret Service (`libsecret`/D-Bus). Owner-approved exception to the >6 months personal-use gate because it replaces an already heavily used authenticator rather than introducing an experimental workflow. Shared `common.yml` module keeps T580 and P14s aligned. | build the GPLv3 application from `ProtonMail/WebClients`, or revert to the previous iOS/macOS authenticator while retaining exported recovery data | 2026-08-25 |
+
+Updates are automatic through the nightly image build: CI resolves the newest active stable RPM from `https://proton.me/download/authenticator/linux/version.json`, writes the versioned URL and SHA-512 into `build-pins.env`, and thereby invalidates the cached installer layer when Proton publishes a release. Local builds resolve the same manifest directly. Proton publishes no DNF repository and no RPM signature; never remove the explicit checksum and RPM identity checks from `files/scripts/install-proton-authenticator-latest.sh`. The installer also patches only Proton's desktop entry with `WEBKIT_DISABLE_DMABUF_RENDERER=1`, Proton's documented workaround for WebKit white screens on NVIDIA; this keeps the P14s reliable without changing global rendering behavior and is harmless on the T580.
+
 ### Phase 3.5 (planned — Playwright system deps)
 
 System libraries the official Playwright Fedora deps list requires. Bake the libs, let `npm`/`npx playwright install` handle the playwright package + browsers per project. See https://playwright.dev/docs/intro
@@ -90,7 +98,7 @@ System libraries the official Playwright Fedora deps list requires. Bake the lib
 
 | Package | Source | Why baked |
 |---|---|---|
-| `cuda-toolkit` | NVIDIA CUDA Fedora repo | nvidia — conda is hard to install on atomic, so bake the toolkit |
+| `cuda-toolkit` | NVIDIA CUDA container images | nvidia — explicitly not baked: RPM payload lands under `/usr/local`, which bootc strips; use per-project `nvcr.io/nvidia/cuda:*-devel-fedora41` containers |
 | `nvtop` | Fedora repo | nvidia (GPU monitoring) |
 
 ## System-wide config files (non-package bakes)

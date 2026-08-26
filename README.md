@@ -42,9 +42,9 @@ See [`RECIPE.md`](./RECIPE.md) for the full package manifest with rationale per 
 - **Bootstrap** (so the dotfiles SSH/GPG/password-store chain works on first boot): `pass`, `gnupg2`, `age`, `openssh-clients`, `git`, `jq`, `curl`
 - **Niri Wayland WM stack**: `niri`, `waybar`, `swayosd`, `kanshi`, `swayidle`, `hyprlock` (fingerprint lockscreen), `mate-polkit`, `SwayNotificationCenter`, `pavucontrol`, `noctalia-shell-v5`
 - **Terminals + shell**: `kitty`, `tmux`, `nushell`
-- **GUI apps**: Microsoft Teams (with Wayland screen-share patch), Chromium + Browserpass, Zen Browser, Helium, Beekeeper Studio, Zed editor
+- **GUI apps**: Microsoft Teams (with Wayland screen-share patch), Chromium + Browserpass, Zen Browser, Helium, Beekeeper Studio, Zed editor, Proton Authenticator
 - **CLI essentials**: `postgresql` (client-only — `psql`, `pg_dump` etc.), `syncthing`, `blueman`, `espanso-wayland`
-- **NVIDIA variant only**: full CUDA toolkit + `nvtop`
+- **NVIDIA variant only**: `nvtop`; CUDA development uses versioned NVIDIA containers because bootc strips RPM payloads under `/usr/local`
 
 What's **not** baked (lives in [chezmoi dotfiles](https://github.com/dpietersz/dotfiles) or distrobox toolboxes):
 

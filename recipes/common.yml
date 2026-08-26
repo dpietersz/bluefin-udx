@@ -61,6 +61,19 @@ modules:
       - install-paseo-latest.sh
 
   # ---------------------------------------------------------------------------
+  # Proton Authenticator.
+  # Proton publishes an official Fedora/RHEL x86_64 RPM but no DNF repository,
+  # so install-proton-authenticator-latest.sh resolves the newest active stable
+  # release from Proton's version.json, verifies its published SHA-512 digest,
+  # validates the RPM identity, and installs it. CI writes the resolved version,
+  # URL, and checksum into build-pins.env so an upstream release invalidates the
+  # cached build layer. Shared here so both Intel and NVIDIA images ship it.
+  # ---------------------------------------------------------------------------
+  - type: script
+    scripts:
+      - install-proton-authenticator-latest.sh
+
+  # ---------------------------------------------------------------------------
   # Client-side cosign verification for ghcr.io/dpietersz/* images.
   # Wires policy.json + registries.d so `rpm-ostree rebase ostree-image-signed:`
   # validates the image signature before deploying. The ghcr.io/dpietersz
