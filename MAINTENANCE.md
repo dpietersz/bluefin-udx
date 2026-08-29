@@ -14,6 +14,7 @@ Set a recurring calendar reminder. Quick pass should take ~15 minutes.
 Check the **specific package page**, never only the parent project. Active multi-package projects can hide an abandoned package—the old `noctalia-shell-v5` setup stayed green this way for months.
 
 - [ ] `lionheartp/Hyprland :: hyprlock` — https://copr.fedorainfracloud.org/coprs/lionheartp/Hyprland/package/hyprlock/ — compare with https://github.com/hyprwm/hyprlock/releases/latest and confirm `hyprlock.repo` remains limited to hyprlock plus its ABI-matched Hypr libraries
+- [ ] `lionheartp/Hyprland :: gpu-screen-recorder` — https://copr.fedorainfracloud.org/coprs/lionheartp/Hyprland/package/gpu-screen-recorder/ — compare the latest successful Fedora 44 x86_64 build with the version in https://git.dec05eba.com/gpu-screen-recorder/plain/meson.build, confirm it was built within 90 days, and confirm `gpu-screen-recorder.repo` still has exact `includepkgs=gpu-screen-recorder`. Inspect the RPM spec for changes to the privileged `gsr-kms-server` helper; `/usr/bin/gsr-kms-server` must retain only `cap_sys_admin=ep` after composition.
 - [ ] `sneexy/zen-browser :: zen-browser` — https://copr.fedorainfracloud.org/coprs/sneexy/zen-browser/package/zen-browser/ — compare its latest successful version with https://github.com/zen-browser/desktop/releases/latest
 - [ ] `barsnick/non-fed :: showmethekey` — https://copr.fedorainfracloud.org/coprs/barsnick/non-fed/package/showmethekey/ — compare with https://github.com/AlynxZhou/showmethekey/releases/latest and confirm `files/system/etc/yum.repos.d/showmethekey.repo` still limits the broad project to `showmethekey*`
 
@@ -22,6 +23,12 @@ If a package is behind upstream—not merely old because upstream itself is quie
 **Direct upstream release installs:**
 - [ ] `nushell` — https://github.com/nushell/nushell/releases/latest — confirm the release still ships `nu-<version>-x86_64-unknown-linux-gnu.tar.gz` plus `SHA256SUMS`, GitHub's asset digest matches that manifest, and CI/local installs report the same version. Nushell currently publishes no independent artifact signature; re-check quarterly and adopt one if offered.
 - [ ] `nwg-displays` — https://github.com/nwg-piotr/nwg-displays/tags — confirm latest tag still builds into `/usr/bin`, `/usr/lib/pythonX.Y/site-packages`, and `/usr/share`. Re-check whether `tofik/nwg-shell` has caught up to ≥0.4.0; prefer Fedora packaging once it is current.
+
+**Noctalia Screen Toolkit runtime proof:**
+- [ ] On both laptops, confirm `gpu-screen-recorder --info` reports H.264 support. The T580 must use Intel VAAPI; the P14s may use Intel VAAPI for an Intel-driven panel or NVENC for an NVIDIA-driven output.
+- [ ] With Noctalia configured for H.264, 30 FPS, visible cursor, system audio, and microphone, record at least 10 seconds fullscreen while playing a clearly identifiable system sound and speaking a different phrase. Save the recording, play it, and confirm both sources are audible.
+- [ ] Run `ffprobe -v error -show_entries stream=codec_type,codec_name,avg_frame_rate -of default=noprint_wrappers=1 <recording.mp4>` and confirm H.264 video at 30 FPS plus AAC audio. `default_output|default_input` is intentionally mixed into one audio track, so stream count alone cannot prove both sources; the listening test is required.
+- [ ] Test one region recording through `wf-recorder`. Treat one default audio source as the supported behavior. Simultaneous system+microphone region audio remains unsupported by the plugin; do not mark this fixed based only on a successful file.
 
 ### 3. Vendor RPM repos
 Verify every non-Fedora repository still resolves metadata and validates its GPG key:

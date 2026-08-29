@@ -81,6 +81,18 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 
 User-layer config (`xdg-desktop-portal` config, OBS profile templated per machine via `.hasNvidia`, mic filter-chain scene collection, OBS plugin pack) lives in dotfiles at `dot_config/obs-studio/` and `.chezmoiscripts/run_onchange_after_18-install-obs-plugins.sh.tmpl`. Module autoload (`/etc/modules-load.d/v4l2loopback.conf`) and module options (`/etc/modprobe.d/v4l2loopback.conf`, `exclusive_caps=1` for Chromium-family camera pickers) are baked here as `files/system/` overlays because they're `/etc/` system scope, not `$HOME`.
 
+### Phase 3f (current — Noctalia Screen Toolkit host dependencies)
+
+| Package | Source | Maintained by | Why baked | Fallback if source dies | Last reviewed |
+|---|---|---|---|---|---|
+| `tesseract` | Fedora repo | Fedora | system-integration — OCR engine invoked directly by Noctalia's host-side `alexander/screen-toolkit` plugin. The language-data packages do not depend on the engine, so listing only a langpack can leave `/usr/bin/tesseract` absent. | n/a (Fedora repo) | 2026-08-29 |
+| `tesseract-langpack-eng` | Fedora repo | Fedora | system-integration — explicit English OCR data guarantee for the plugin's configured `eng+nld`; do not rely on incidental base-image contents. | n/a (Fedora repo) | 2026-08-29 |
+| `tesseract-langpack-nld` | Fedora repo | Fedora | system-integration — Dutch OCR data for the plugin's configured `eng+nld`. | n/a (Fedora repo) | 2026-08-29 |
+| `gpu-screen-recorder` | package-scoped `lionheartp/Hyprland` COPR | dec05eba (upstream) / lionheartp (COPR) | screen-share — preferred fullscreen backend for Noctalia; supports Wayland H.264 through NVENC or VAAPI and combines `default_output\|default_input` into one audio track. Shared package serves both laptops. Broad COPR is exposed through `gpu-screen-recorder.repo` with exact `includepkgs=gpu-screen-recorder`. Package `%post` grants only `/usr/bin/gsr-kms-server` `cap_sys_admin=ep`, required for KMS monitor/region capture; smoke tests assert the capability survives image composition. | use `wf-recorder` with one audio source, or OBS for dual-audio recording; never replace this with Flatpak/AppImage or an unpinned source build | 2026-08-29 |
+| `wf-recorder` | Fedora repo | Fedora | screen-share — maintainable region-recording fallback. No Fedora RPM exists for plugin-preferred `wl-screenrec`. Current plugin can capture only one default audio source on this path; simultaneous system+microphone audio is **not supported for region recording**. | OBS region/source capture, or adopt `wl-screenrec` only after Fedora or a durable scoped COPR packages it | 2026-08-29 |
+
+Build/smoke checks prove package identity, OCR language discovery, GSR CLI contract, linked libraries, and the privileged helper capability. They cannot prove hardware encoding or live PipeWire routing inside a container with no compositor, GPU, microphone, or active audio graph. After deployment, test one fullscreen recording on each laptop and verify H.264 plus audible system/microphone content; quarterly instructions live in `MAINTENANCE.md`.
+
 ### Current standalone Proton GUI packages
 
 | Package | Source | Maintained by | Why baked | Fallback if source dies | Last reviewed |
@@ -134,3 +146,7 @@ System libraries the official Playwright Fedora deps list requires. Bake the lib
 | GUI macOS-only apps (Aerospace, Raycast, Granola, Arq, Polypane Mac build, …) | Wrong OS | Homebrew (`dotfiles/.chezmoiscripts/run_once_before_01b-install-homebrew-packages.sh.tmpl`) |
 | AppImage-only desktop apps with per-user updaters (VibeTyper, Terax) | Vendor-driven update cadence faster than image rebuild | chezmoi user-scope scripts |
 | Flatpak runtimes | Explicit user preference: no Flatpak | n/a |
+| `pass-otp` | Password-store OTP is not used; Proton Authenticator owns TOTP. The Noctalia `emrtnn/pass` plugin is password-only in this setup. | n/a |
+| `wl-screenrec` | No Fedora/RPM Fusion package or durable scoped COPR. A direct Cargo build would create a permanent Rust dependency layer and fail the maintainable-source criterion. `wf-recorder` supplies region capture with the documented one-audio-source limitation. | n/a |
+| Screen Toolkit optional tools (`hyprpicker`, `zbar`, `translate-shell`, `swappy`, `gimp`) | Selected workflow does not use color picking, QR, translation, or these annotation fallbacks; `satty` already provides the chosen user-scope annotation path. | existing base/user tooling only; nothing newly baked |
+| `mpv` for Screen Toolkit | Only used by the legacy panel recording-preview action; configured panel mode is `standard`. A Linuxbrew binary on one host is not treated as image evidence. | launch saved recordings with the normal desktop handler |

@@ -1,0 +1,14 @@
+[copr:copr.fedorainfracloud.org:lionheartp:Hyprland-gpu-screen-recorder]
+name=Copr repo for current gpu-screen-recorder builds (package-scoped)
+baseurl=https://download.copr.fedorainfracloud.org/results/lionheartp/Hyprland/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=False
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/lionheartp/Hyprland/pubkey.gpg
+repo_gpgcheck=0
+enabled=1
+enabled_metadata=1
+# Hyprland is a broad multi-package project. Expose only the recorder CLI;
+# hyprlock and its ABI-matched libraries remain independently scoped by
+# hyprlock.repo. This prevents unrelated packages from entering resolution.
+includepkgs=gpu-screen-recorder

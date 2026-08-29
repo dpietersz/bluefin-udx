@@ -216,6 +216,17 @@ modules:
       # in dotfiles. See RECIPE.md.
       - grim                    # Wayland screenshot capture (Fedora base)
       - slurp                   # Wayland region selector (Fedora base)
+      # Noctalia Screen Toolkit selected features: English/Dutch OCR plus
+      # fullscreen and region recording. gpu-screen-recorder comes from the
+      # separately scoped section of lionheartp/Hyprland exposed by the baked
+      # gpu-screen-recorder.repo; wf-recorder and OCR packages are Fedora base.
+      # wl-screenrec is deliberately excluded: no maintainable Fedora RPM.
+      # pass-otp is deliberately excluded: Proton Authenticator owns OTP.
+      - tesseract
+      - tesseract-langpack-eng
+      - tesseract-langpack-nld
+      - gpu-screen-recorder
+      - wf-recorder
       # wl-mirror — Wayland output mirror client (wlr-screencopy /
       # ext-image-copy-capture, same screencopy family as grim above). niri has
       # no native output mirroring, so dotfiles' niri-mirror-toggle (Ctrl+Alt+M)

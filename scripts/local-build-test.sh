@@ -177,6 +177,81 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     check_rpm wl-mirror
     check_bin wl-mirror
 
+    echo "Phase 3f Noctalia Screen Toolkit host dependencies:"
+    check_rpm tesseract
+    check_bin tesseract
+    check_rpm tesseract-langpack-eng
+    check_rpm tesseract-langpack-nld
+    TESS_LANGS=$(tesseract --list-langs 2>/dev/null || true)
+    for lang in eng nld; do
+        if grep -qx "$lang" <<< "$TESS_LANGS"; then
+            echo "  ok    tesseract language $lang"
+        else
+            echo "  MISS  tesseract language $lang"
+            FAIL=1
+        fi
+    done
+    if rpm -q pass-otp >/dev/null 2>&1; then
+        echo "  FAIL  pass-otp installed despite Proton Authenticator owning OTP"
+        FAIL=1
+    else
+        echo "  ok    pass-otp deliberately absent"
+    fi
+    if command -v wl-screenrec >/dev/null 2>&1; then
+        echo "  FAIL  wl-screenrec present despite no approved Fedora package source"
+        FAIL=1
+    else
+        echo "  ok    unmaintainable wl-screenrec absent"
+    fi
+    check_rpm wf-recorder
+    check_bin wf-recorder
+    check_rpm gpu-screen-recorder
+    check_bin gpu-screen-recorder
+    check_bin gsr-kms-server
+    check_file /etc/yum.repos.d/gpu-screen-recorder.repo
+    check_rpm_vendor gpu-screen-recorder "Fedora Copr - user lionheartp"
+    if grep -qx "includepkgs=gpu-screen-recorder" /etc/yum.repos.d/gpu-screen-recorder.repo; then
+        echo "  ok    gpu-screen-recorder COPR is exact-package scoped"
+    else
+        echo "  FAIL  gpu-screen-recorder COPR scope widened or missing"
+        FAIL=1
+    fi
+    GSR_VERSION=$(rpm -q --qf "%{VERSION}" gpu-screen-recorder 2>/dev/null || true)
+    if [ "$(printf "%s\n" "6.0.2" "$GSR_VERSION" | sort -V | head -n1)" != "6.0.2" ]; then
+        echo "  FAIL  gpu-screen-recorder ${GSR_VERSION:-missing} is older than required 6.0.2"
+        FAIL=1
+    else
+        echo "  ok    gpu-screen-recorder $GSR_VERSION (>= 6.0.2)"
+    fi
+    GSR_CAP=$(/usr/sbin/getcap /usr/bin/gsr-kms-server 2>/dev/null || true)
+    if [ "$GSR_CAP" = "/usr/bin/gsr-kms-server cap_sys_admin=ep" ]; then
+        echo "  ok    gsr-kms-server capability: cap_sys_admin=ep"
+    else
+        echo "  FAIL  gsr-kms-server capability missing or broader than cap_sys_admin=ep: ${GSR_CAP:-none}"
+        FAIL=1
+    fi
+    if ldd /usr/bin/gpu-screen-recorder 2>&1 | grep -q "not found"; then
+        echo "  FAIL  gpu-screen-recorder has unresolved shared libraries"
+        ldd /usr/bin/gpu-screen-recorder 2>&1 | grep "not found" || true
+        FAIL=1
+    else
+        echo "  ok    gpu-screen-recorder shared libraries resolved"
+    fi
+    if zgrep -Fq "default_output|default_input" /usr/share/man/man1/gpu-screen-recorder.1.gz; then
+        echo "  ok    gpu-screen-recorder documents combined system and microphone audio"
+    else
+        echo "  FAIL  gpu-screen-recorder combined-audio CLI contract missing"
+        FAIL=1
+    fi
+    for encoder in h264_vaapi h264_nvenc; do
+        if ffmpeg -hide_banner -encoders 2>/dev/null | grep -qw "$encoder"; then
+            echo "  ok    ffmpeg encoder $encoder"
+        else
+            echo "  MISS  ffmpeg encoder $encoder"
+            FAIL=1
+        fi
+    done
+
     echo "Phase 3d OBS Studio + v4l2loopback:"
     check_rpm obs-studio
     check_bin obs
