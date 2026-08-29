@@ -40,7 +40,7 @@ Baking system packages into a custom bootc image fixes all three:
 See [`RECIPE.md`](./RECIPE.md) for the full package manifest with rationale per package and fallback plan if any upstream source dies. High level:
 
 - **Bootstrap** (so the dotfiles SSH/GPG/password-store chain works on first boot): `pass`, `gnupg2`, `age`, `openssh-clients`, `git`, `jq`, `curl`
-- **Niri Wayland WM stack**: `niri`, `waybar`, `swayosd`, `kanshi`, `swayidle`, `hyprlock` (fingerprint lockscreen), `mate-polkit`, `SwayNotificationCenter`, `pavucontrol`, `noctalia-shell-v5`
+- **Niri Wayland WM stack**: `niri`, `waybar`, `kanshi`, `swayidle`, `hyprlock` (fingerprint lockscreen), `mate-polkit`, `SwayNotificationCenter`, `pavucontrol`, `noctalia`
 - **Terminals + shell**: `kitty`, `tmux`, `nushell`
 - **GUI apps**: Microsoft Teams (with Wayland screen-share patch), Chromium + Browserpass, Zen Browser, Helium, Beekeeper Studio, Zed editor, Proton Authenticator, Proton Mail
 - **CLI essentials**: `postgresql` (client-only — `psql`, `pg_dump` etc.), `syncthing`, `blueman`, `espanso-wayland`
@@ -79,7 +79,7 @@ sudo bootc switch ghcr.io/<you>/<your-image>:stable
 
 Images are rebuilt nightly by [GitHub Actions](.github/workflows/build.yml) at 04:20 UTC. Bluefin's `rpm-ostreed-automatic.timer` checks every 6 hours and stages updates; they apply on next reboot. Toggle the timer with `ujust toggle-updates`.
 
-So in practice: you reboot when you feel like it; you're always within 24 hours of the latest CI build.
+So in practice: reboot when convenient. GitHub schedules are best-effort and have occasionally started many hours late, so “within 24 hours” is a target—not a guarantee. Check the workflow before assuming an upstream update was published.
 
 ## Cosign verification
 
@@ -128,7 +128,7 @@ CI runs the same smoke-boot gate after building; the image is only pushed to ghc
 
 ## Maintenance
 
-See [`MAINTENANCE.md`](./MAINTENANCE.md) for the quarterly review checklist. Renovate watches the base image, GitHub Actions versions, and the third-party repos for drift; PRs land weekly on Monday morning.
+See [`MAINTENANCE.md`](./MAINTENANCE.md) for the quarterly review checklist. Renovate keeps GitHub Actions references current; nightly builds pull the mutable Bluefin `stable` base. COPR and vendor-repository freshness is checked explicitly in the maintenance checklist because Renovate does not understand those sources.
 
 ## Related repos
 

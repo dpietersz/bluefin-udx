@@ -41,13 +41,13 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 |---|---|---|
 | `kitty` | Fedora repo | system-tool (terminal) |
 | `tmux` | Fedora repo | system-tool |
-| `nushell` | Fedora repo | system-tool (shell) |
+| `nushell` | upstream GitHub release via `install-nushell-latest.sh` | system-tool (shell) — replaced `atim/nushell` COPR after Fedora 44 builds stalled at 0.112.2; CI resolves the newest tag and requires GitHub's asset digest to match upstream `SHA256SUMS` before each build (integrity check, not an independent signature) |
 | `mate-polkit` | Fedora repo | system-integration (polkit agent for niri) |
 | `syncthing` | Fedora repo | system-tool |
-| `niri`, `waybar` | COPR (niri upstream) | system-tool (compositor) |
-| `hyprlock`, `swayidle` | Terra + Fedora | system-integration (fingerprint lockscreen) |
+| `niri`, `waybar` | Fedora repo | system-tool (compositor) — Fedora 44 updates currently carries upstream `niri` 26.04, so the former `yalter/niri` COPR added supply-chain risk without a version benefit |
+| `hyprlock`, `swayidle` | package-scoped `lionheartp/Hyprland` COPR + Fedora | system-integration (fingerprint lockscreen) — COPR repo is constrained to hyprlock and ABI-matched Hypr libraries; nightly audit compares package version with upstream release |
 | `espanso-wayland` | Terra | system-tool (CAP_DAC_OVERRIDE via post-install) |
-| `noctalia-shell-v5` | COPR `lionheartp/Hyprland` | system-tool (Wayland shell) |
+| `noctalia` | Fedora repo | system-tool (Wayland shell) — official Fedora 44+ package follows tagged v5 beta releases; replaced abandoned `noctalia-shell-v5` COPR snapshot (`cce1141`, 2026-05-18) |
 | `nwg-displays` | upstream tarball via `install-nwg-displays-latest.sh` | system-integration (GTK3+python-gi GUI for niri output config; sibling to baked `kanshi`/`niri`. Writes `~/.config/niri/monitor.kdl`, niri hot-reloads. **Not COPR**: `tofik/nwg-shell` is stuck on v0.3.28 (pre-niri); upstream 0.4.x added `NIRI_SOCKET` detection. Fallback: switch back to `tofik/nwg-shell` COPR once they ship ≥ 0.4.0.) |
 | `grim` | Fedora repo | system-integration (Wayland screenshot capture — needed by niri+satty pipeline; satty itself lives user-scope in dotfiles via upstream GH release tarball, not baked, because the only COPR `mineiro/satty` is single-maintainer / 3-commits-young) |
 | `slurp` | Fedora repo | system-integration (Wayland region selector — paired with grim) |
@@ -61,11 +61,10 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 | Browserpass + browserpass-chromium | Fedora repo | system-integration (native messaging w/ pass) |
 | Beekeeper Studio | vendor RPM (`beekeeperstudio.io`) — corrected `.repo` + baked GPG key | stable + integration |
 | Zed editor | **Terra** (`zed`) — *not* a dedicated COPR | system-tool (code editor). Terra's `zed` is zfs-collision-aware: `Requires: (zed-cli-compat-zfs if zfs else zed-cli)`, so on the zfs-shipping base the editor binary is `/usr/bin/zeditor` and `/usr/bin/zed` stays the ZFS Event Daemon. **Do not re-add the `che/zed` COPR** — it ships a monolithic `zed` that claims `/usr/bin/zed` + `dev.zed.Zed.desktop`/`metainfo`; with both repos enabled dnf picks the higher version and a che/zed win = 3-way file conflict that kills the build (root cause of the 2026-06-14 nightly failure). Fallback if Terra ever drops `zed`: pin a che/zed build *and* exclude Terra's `zed*`, or build from source. |
-| Terra repo (espanso-wayland, hyprlock, helium-browser-bin) | metalink `tetsudou.fyralabs.com` + baked GPG key | unattended-build immunity to `repos.fyralabs.com` outages |
+| Terra repo (espanso-wayland, helium-browser-bin, zed) | metalink `tetsudou.fyralabs.com` + baked GPG key | unattended-build immunity to `repos.fyralabs.com` outages |
 | Bruno | vendor RPM (`usebruno.com`) | stable + integration |
 | LocalSend | GH releases RPM | system-integration (host firewall already wired) |
 | Polypane | AppImage extract → `/opt/polypane` | stable + integration |
-| Obsidian | COPR `cosmicfusion/Obsidian` (fallback: AppImage extract) | stable |
 | Zen Browser | COPR `sneexy/zen-browser` (fallback: `firminunderscore/zen-browser`) | daily driver browser |
 | Helium | Terra `helium-browser-bin` (pin version) | secondary browser — ships without Widevine; Spotify DRM fixed in dotfiles via the Chromium donor (see Chromium row) |
 
@@ -77,7 +76,7 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 | `obs-studio-plugin-vaapi` | Fedora repo | Fedora | screen-share — VAAPI is a split package on modern obs-studio; required for the T580 (Intel iGPU) hardware encoder. Bake on both variants so one image serves both laptops. | n/a (Fedora repo) | 2026-05-30 |
 | `v4l-utils` | Fedora repo | Fedora | system-integration — `v4l2-ctl` CLI for inspecting/debugging the OBS virtual camera (and any future v4l2 work). Referenced by the dotfiles OBS runbook (`~/.config/obs-studio/README.md`). ~50 KB. | n/a (Fedora repo) | 2026-05-30 |
 | `mediainfo` | Fedora repo | Fedora | system-integration — readable codec / container / color-range / frame-rate-mode / audio-track inspection of recorded video. Referenced by the dotfiles OBS runbook for verifying CFR, 48 kHz, BT.709 limited on test recordings; without it the runbook step has to fall back to `ffprobe`. ~500 KB. | n/a (Fedora repo) | 2026-05-30 |
-| `showmethekey` | COPR `pesader/showmethekey` | Alynx Zhou (upstream) / pesader (COPR) | screen-share — modern Wayland keystroke visualizer for OBS demo recordings (replaces unmaintained `wshowkeys` forks; `screenkey` is X11-only and doesn't work on niri). GTK4 overlay, libinput-direct (compositor-agnostic, runs on niri via `showmethekey-gtk -kAC`). Polkit rule shipped in the RPM gates `/dev/input/event*` access — no input-group hack needed, system-scope, cannot live in dotfiles. **Version-as-of-bake: `1.17.0-2` (fedora-44)**, predates the v1.19.0 polkit hardening that narrowed the allow rule to local-active-session only. Acceptable on single-user laptops; revisit when pesader rebuilds against newer upstream. | switch to upstream tarball build (overkill) or wait for COPR refresh | 2026-05-30 |
+| `showmethekey` | package-scoped `barsnick/non-fed` COPR | Alynx Zhou (upstream) / barsnick (COPR) | screen-share — modern Wayland keystroke visualizer for OBS demo recordings. Switched from abandoned `pesader/showmethekey` v1.17.0 to v1.21.0, restoring upstream's post-v1.19 local-active-session polkit hardening. Broad COPR is constrained by baked `showmethekey.repo` with `includepkgs=showmethekey*`, preventing unrelated package overrides. CI enforces version >=1.21.0 and presence of the polkit rule. | build tagged upstream source with Meson if this COPR falls behind | 2026-08-29 |
 | `kmod-v4l2loopback` | **base image** (`bluefin-dx` / `bluefin-dx-nvidia-open` already ship it, signed with the `ublue kernel` MOK key enrolled on host) | Universal Blue | system-integration — kernel module for the OBS virtual camera (`/dev/video*` device exposed to Teams/Zoom/Slack). **Not layered** in this recipe — verified 2026-05-30 that a `type: akmods` block fails with "cannot install both ... from @commandline and ... from @System" because base already provides it. **Do NOT swap for RPM Fusion's `akmod-v4l2loopback`** — that is source-akmod, unsigned, build-at-boot, silently fails to load under Secure Boot (unlike the signed uBlue `kmod-nvidia-open` shipped on `-nvidia-open` base, which is NOT the RPM Fusion source-akmod). | if base ever drops it, re-add via bluebuild `akmods` module pulling from `ghcr.io/ublue-os/akmods` (main flavor) | 2026-05-30 |
 
 User-layer config (`xdg-desktop-portal` config, OBS profile templated per machine via `.hasNvidia`, mic filter-chain scene collection, OBS plugin pack) lives in dotfiles at `dot_config/obs-studio/` and `.chezmoiscripts/run_onchange_after_18-install-obs-plugins.sh.tmpl`. Module autoload (`/etc/modules-load.d/v4l2loopback.conf`) and module options (`/etc/modprobe.d/v4l2loopback.conf`, `exclusive_caps=1` for Chromium-family camera pickers) are baked here as `files/system/` overlays because they're `/etc/` system scope, not `$HOME`.
@@ -127,6 +126,8 @@ System libraries the official Playwright Fedora deps list requires. Bake the lib
 |---|---|---|
 | Qutebrowser | Dropped per user — no longer used | n/a |
 | Anytype | Official path is Snap/Flatpak/AppImage; only `poesty/anytype` community COPR. Not worth the supply-chain risk. | dropped |
+| Obsidian | No Fedora package; historical `alxhr0/Obsidian` COPR died. A documented `cosmicfusion/Obsidian` fallback never existed. | `udx-toolbox` via boxkit |
+| SwayOSD | Removed: package source was abandoned at v0.1.0, no service or process used it, and every volume/brightness/media OSD keybind already targets Noctalia. | Noctalia |
 | Microsoft Storage Explorer | MS ships AppImage only; rarely launched | `common-toolbox` (distrobox) |
 | All language tooling (node, go, python, bun, …) | Per-project pinning matters more than system-wide latest | mise (`dotfiles/dot_config/mise/config.toml.tmpl`) |
 | All CLI dev tools (bat, eza, fzf, ripgrep, neovim, starship, …) | Same as above | mise |

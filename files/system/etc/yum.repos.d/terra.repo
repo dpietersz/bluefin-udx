@@ -1,5 +1,5 @@
 # Terra (Fyra Labs) — third-party Fedora repo.
-# Ships espanso-wayland, hyprlock, helium-browser-bin.
+# Ships espanso-wayland, helium-browser-bin, and zed.
 #
 # Self-contained: metalink lets the client pick a healthy mirror (the primary
 # repos.fyralabs.com has had reachability outages — observed 2026-06-03) and

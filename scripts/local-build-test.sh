@@ -61,7 +61,12 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
         if [ -e "$1" ]; then echo "  ok    $1"; else echo "  MISS  $1"; FAIL=1; fi
     }
     check_rpm() {
-        if rpm -q "$1" >/dev/null 2>&1; then echo "  ok    rpm $1"; else echo "  MISS  rpm $1"; FAIL=1; fi
+        RPM_NEVRA=$(rpm -q --qf "%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}" "$1" 2>/dev/null || true)
+        if [ -n "$RPM_NEVRA" ]; then echo "  ok    rpm $RPM_NEVRA"; else echo "  MISS  rpm $1"; FAIL=1; fi
+    }
+    check_rpm_vendor() {
+        RPM_VENDOR=$(rpm -q --qf "%{VENDOR}" "$1" 2>/dev/null || true)
+        if [ "$RPM_VENDOR" = "$2" ]; then echo "  ok    $1 vendor: $RPM_VENDOR"; else echo "  FAIL  $1 vendor: ${RPM_VENDOR:-missing}, expected $2"; FAIL=1; fi
     }
 
     echo "Phase 0 bootstrap binaries:"
@@ -76,8 +81,19 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     echo "Phase 2 system packages:"
     for p in kitty tmux kanshi mate-polkit syncthing swayidle \
              niri waybar pavucontrol NetworkManager-tui blueman SwayNotificationCenter \
-             espanso-wayland hyprlock noctalia-shell-v5 \
-             nushell swayosd; do check_rpm "$p"; done
+             espanso-wayland hyprlock noctalia; do check_rpm "$p"; done
+    check_bin noctalia
+    check_rpm_vendor niri "Fedora Project"
+    check_rpm_vendor noctalia "Fedora Project"
+    check_file /etc/yum.repos.d/hyprlock.repo
+    check_bin nu
+    echo "  info  nushell $(nu --version)"
+    if rpm -q noctalia-shell-v5 >/dev/null 2>&1; then
+        echo "  FAIL  obsolete noctalia-shell-v5 package still installed"
+        FAIL=1
+    else
+        echo "  ok    obsolete noctalia-shell-v5 absent"
+    fi
     # nwg-displays — installed from upstream tarball (not RPM-backed).
     # Verify the binary exists AND the installed source has niri detection
     # (NIRI_SOCKET env-var check) so a regression back to a pre-0.4 build fails fast.
@@ -186,6 +202,14 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     echo "Phase 3e showmethekey:"
     check_rpm showmethekey
     check_bin showmethekey-gtk
+    check_file /etc/yum.repos.d/showmethekey.repo
+    SHOWMETHEKEY_VERSION=$(rpm -q --qf "%{VERSION}" showmethekey 2>/dev/null || true)
+    if [ "$(printf "%s\n" "1.21.0" "$SHOWMETHEKEY_VERSION" | sort -V | head -n1)" != "1.21.0" ]; then
+        echo "  FAIL: showmethekey ${SHOWMETHEKEY_VERSION:-missing} is older than required 1.21.0"
+        FAIL=1
+    else
+        echo "  ok    showmethekey $SHOWMETHEKEY_VERSION (>= 1.21.0)"
+    fi
     # Polkit rule ships in the RPM — confirm at least one polkit-1 file from
     # the package landed under /usr/share/. Filename varies by version
     # (me.alynx.* in 1.17.x; renamed later); glob instead of hardcoding.

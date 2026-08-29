@@ -42,6 +42,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Audit COPR package freshness
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/audit-copr-freshness.sh
+
       # ----------------------------------------------------------------------
       # Disk cleanup. RAM (16 GB ceiling on ubuntu-24.04 hosted runners), not
       # disk, is the actual constraint — see commit log for the buildx→podman
@@ -203,8 +208,9 @@ jobs:
       # ----------------------------------------------------------------------
       # Pre-resolve external "latest" versions using GITHUB_TOKEN (1000 req/h
       # quota) BEFORE the build, write them to a pin file that the in-build
-      # scripts (install-nwg-displays-latest.sh, install-paseo-latest.sh,
-      # install-proton-authenticator-latest.sh, install-proton-mail-latest.sh)
+      # scripts (install-nwg-displays-latest.sh, install-nushell-latest.sh,
+      # install-paseo-latest.sh, install-proton-authenticator-latest.sh,
+      # install-proton-mail-latest.sh)
       # can pick up from their bluebuild script/files mounts. This avoids the
       # unauthenticated GitHub API rate limit (60/h per IP) hit on 2026-06-03 —
       # both matrix legs share the runner IP pool so the second leg's API calls
@@ -217,6 +223,28 @@ jobs:
         run: |
           set -euo pipefail
           NWG_TAG=$(gh api repos/nwg-piotr/nwg-displays/tags --jq '.[0].name')
+
+          # atim/nushell COPR fell behind upstream. Resolve Nushell's official
+          # tagged binary. Require GitHub's asset digest and upstream SHA256SUMS
+          # to agree; upstream publishes no independent artifact signature.
+          NUSHELL_RELEASE=$(gh api repos/nushell/nushell/releases/latest)
+          NUSHELL_TAG=$(jq -r '.tag_name' <<<"$NUSHELL_RELEASE")
+          NUSHELL_VERSION="${NUSHELL_TAG#v}"
+          NUSHELL_ARCHIVE="nu-${NUSHELL_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          NUSHELL_API_SHA256=$(jq -r --arg archive "$NUSHELL_ARCHIVE" \
+            '.assets[] | select(.name == $archive) | .digest // empty' <<<"$NUSHELL_RELEASE")
+          NUSHELL_API_SHA256="${NUSHELL_API_SHA256#sha256:}"
+          NUSHELL_MANIFEST_SHA256=$(curl -fsSL --retry 5 --retry-all-errors \
+            "https://github.com/nushell/nushell/releases/download/${NUSHELL_TAG}/SHA256SUMS" \
+            | awk -v archive="$NUSHELL_ARCHIVE" '$2 == archive { print $1; exit }')
+          if [[ ! "$NUSHELL_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ||
+                ! "$NUSHELL_API_SHA256" =~ ^[0-9a-fA-F]{64}$ ||
+                "$NUSHELL_API_SHA256" != "$NUSHELL_MANIFEST_SHA256" ]]; then
+            echo "::error::Invalid or inconsistent Nushell release digests"
+            exit 1
+          fi
+          NUSHELL_SHA256="$NUSHELL_API_SHA256"
+
           # Do NOT trust /releases/latest for paseo. getpaseo/paseo has shipped
           # duplicate tags with empty "latest" releases (2026-06-10: two v0.1.93
           # releases — the newer id 337050406 with 0 assets, which /releases/latest
@@ -293,6 +321,8 @@ jobs:
           # never inject syntax into that source operation.
           {
             printf 'NWG_DISPLAYS_TAG=%q\n' "$NWG_TAG"
+            printf 'NUSHELL_TAG=%q\n' "$NUSHELL_TAG"
+            printf 'NUSHELL_SHA256=%q\n' "$NUSHELL_SHA256"
             printf 'PASEO_RPM_URL=%q\n' "$PASEO_URL"
             printf 'PROTON_AUTHENTICATOR_VERSION=%q\n' "$PROTON_VERSION"
             printf 'PROTON_AUTHENTICATOR_RPM_URL=%q\n' "$PROTON_URL"
@@ -384,7 +414,12 @@ jobs:
                 if [ -e "$1" ]; then echo "  ok    $1"; else echo "  MISS  $1"; FAIL=1; fi
             }
             check_rpm() {
-                if rpm -q "$1" >/dev/null 2>&1; then echo "  ok    rpm $1"; else echo "  MISS  rpm $1"; FAIL=1; fi
+                RPM_NEVRA=$(rpm -q --qf "%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}" "$1" 2>/dev/null || true)
+                if [ -n "$RPM_NEVRA" ]; then echo "  ok    rpm $RPM_NEVRA"; else echo "  MISS  rpm $1"; FAIL=1; fi
+            }
+            check_rpm_vendor() {
+                RPM_VENDOR=$(rpm -q --qf "%{VENDOR}" "$1" 2>/dev/null || true)
+                if [ "$RPM_VENDOR" = "$2" ]; then echo "  ok    $1 vendor: $RPM_VENDOR"; else echo "  FAIL  $1 vendor: ${RPM_VENDOR:-missing}, expected $2"; FAIL=1; fi
             }
             # rpmdb integrity, asserted BEFORE anything that depends on it.
             # Independent of any build-host theory: a storage layer that
@@ -410,8 +445,19 @@ jobs:
             echo "Phase 2 system packages:"
             for p in kitty tmux kanshi mate-polkit syncthing swayidle \
                      niri waybar pavucontrol NetworkManager-tui blueman SwayNotificationCenter \
-                     espanso-wayland hyprlock noctalia-shell-v5 \
-                     nushell swayosd; do check_rpm "$p"; done
+                     espanso-wayland hyprlock noctalia; do check_rpm "$p"; done
+            check_bin noctalia
+            check_rpm_vendor niri "Fedora Project"
+            check_rpm_vendor noctalia "Fedora Project"
+            check_file /etc/yum.repos.d/hyprlock.repo
+            check_bin nu
+            echo "  info  nushell $(nu --version)"
+            if rpm -q noctalia-shell-v5 >/dev/null 2>&1; then
+              echo "  FAIL  obsolete noctalia-shell-v5 package still installed"
+              FAIL=1
+            else
+              echo "  ok    obsolete noctalia-shell-v5 absent"
+            fi
             # nwg-displays — installed from upstream tarball (not RPM-backed).
             check_bin nwg-displays
             if ! grep -q NIRI_SOCKET /usr/lib/python3.*/site-packages/nwg_displays/main.py 2>/dev/null; then
@@ -512,6 +558,14 @@ jobs:
             echo "Phase 3e showmethekey:"
             check_rpm showmethekey
             check_bin showmethekey-gtk
+            check_file /etc/yum.repos.d/showmethekey.repo
+            SHOWMETHEKEY_VERSION=$(rpm -q --qf "%{VERSION}" showmethekey 2>/dev/null || true)
+            if [ "$(printf "%s\n" "1.21.0" "$SHOWMETHEKEY_VERSION" | sort -V | head -n1)" != "1.21.0" ]; then
+              echo "  FAIL: showmethekey ${SHOWMETHEKEY_VERSION:-missing} is older than required 1.21.0"
+              FAIL=1
+            else
+              echo "  ok    showmethekey $SHOWMETHEKEY_VERSION (>= 1.21.0)"
+            fi
             if ! rpm -ql showmethekey 2>/dev/null | grep -q "/usr/share/polkit-1/"; then
                 echo "  FAIL: showmethekey RPM ships no /usr/share/polkit-1/ rule — input access would prompt for sudo"
                 exit 1

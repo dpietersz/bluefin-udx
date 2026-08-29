@@ -10,25 +10,26 @@ Set a recurring calendar reminder. Quick pass should take ~15 minutes.
 - [ ] Are the latest nightly builds for **both** `bluefin-udx` and `bluefin-udx-nvidia` green on GitHub Actions?
 - [ ] If red for > 3 consecutive nights, investigate immediately (don't wait for the quarterly review).
 
-### 2. COPR liveness
-For each COPR baked into `common.yml`, check it received at least one build in the last quarter:
-- [ ] `sneexy/zen-browser` — https://copr.fedorainfracloud.org/coprs/sneexy/zen-browser/builds/
-- [ ] `cosmicfusion/Obsidian` (Phase 3) — https://copr.fedorainfracloud.org/coprs/cosmicfusion/Obsidian/builds/
-- [ ] `lionheartp/Hyprland` (Phase 2, for noctalia-shell-v5) — https://copr.fedorainfracloud.org/coprs/lionheartp/Hyprland/builds/
+### 2. COPR package freshness
+Check the **specific package page**, never only the parent project. Active multi-package projects can hide an abandoned package—the old `noctalia-shell-v5` setup stayed green this way for months.
 
-**Upstream GitHub tarball installs (verify each quarter that the install path still works):**
-- [ ] `nwg-displays` — https://github.com/nwg-piotr/nwg-displays/tags — confirm latest tag still ships an `install.sh` that writes to `/usr/bin`, `/usr/lib/pythonX.Y/site-packages`, and `/usr/share` only. If upstream changes layout, update `files/scripts/install-nwg-displays-latest.sh`. Re-check whether `tofik/nwg-shell` COPR has caught up to ≥ 0.4.x — if so, switch back to the COPR (simpler).
+- [ ] `lionheartp/Hyprland :: hyprlock` — https://copr.fedorainfracloud.org/coprs/lionheartp/Hyprland/package/hyprlock/ — compare with https://github.com/hyprwm/hyprlock/releases/latest and confirm `hyprlock.repo` remains limited to hyprlock plus its ABI-matched Hypr libraries
+- [ ] `sneexy/zen-browser :: zen-browser` — https://copr.fedorainfracloud.org/coprs/sneexy/zen-browser/package/zen-browser/ — compare its latest successful version with https://github.com/zen-browser/desktop/releases/latest
+- [ ] `barsnick/non-fed :: showmethekey` — https://copr.fedorainfracloud.org/coprs/barsnick/non-fed/package/showmethekey/ — compare with https://github.com/AlynxZhou/showmethekey/releases/latest and confirm `files/system/etc/yum.repos.d/showmethekey.repo` still limits the broad project to `showmethekey*`
 
-If any COPR has gone dormant (> 90 days without a build) and upstream has released a new version, switch to the documented fallback (see RECIPE.md "Fallback if source dies" column).
+If a package is behind upstream—not merely old because upstream itself is quiet—switch to the documented fallback. Never infer package freshness from a COPR project's newest unrelated build. `scripts/audit-copr-freshness.sh` enforces this comparison in nightly CI after a seven-day packaging grace period; keep its package map aligned with every baked COPR.
+
+**Direct upstream release installs:**
+- [ ] `nushell` — https://github.com/nushell/nushell/releases/latest — confirm the release still ships `nu-<version>-x86_64-unknown-linux-gnu.tar.gz` plus `SHA256SUMS`, GitHub's asset digest matches that manifest, and CI/local installs report the same version. Nushell currently publishes no independent artifact signature; re-check quarterly and adopt one if offered.
+- [ ] `nwg-displays` — https://github.com/nwg-piotr/nwg-displays/tags — confirm latest tag still builds into `/usr/bin`, `/usr/lib/pythonX.Y/site-packages`, and `/usr/share`. Re-check whether `tofik/nwg-shell` has caught up to ≥0.4.0; prefer Fedora packaging once it is current.
 
 ### 3. Vendor RPM repos
-For each vendor `.repo` URL baked into `common.yml`, verify it still returns 200 and the GPG key still validates:
+Verify every non-Fedora repository still resolves metadata and validates its GPG key:
 - [ ] Microsoft Teams — https://repo.teamsforlinux.de/rpm/teams-for-linux.repo
-- [ ] Beekeeper Studio (Phase 3)
-- [ ] Bruno (Phase 3)
-- [ ] NVIDIA CUDA (Phase 4)
+- [ ] Beekeeper Studio — baked `files/system/etc/yum.repos.d/beekeeper-studio.repo`
+- [ ] Terra — baked `files/system/etc/yum.repos.d/terra.repo`
 
-A 4xx on any of these breaks the image build. Renovate is configured to flag this, but eyeball it anyway.
+A failure breaks the image build. Renovate does **not** understand COPR or vendor-repository freshness; this review owns it.
 
 **Standalone vendor artifacts (no package repository):**
 - [ ] Proton Authenticator — compare the first active stable x86_64 RPM in https://proton.me/download/authenticator/linux/version.json with `rpm -q proton-authenticator` on both laptops. Confirm URL remains under `https://proton.me/download/authenticator/linux/`, SHA-512 is still present, and package identity remains `proton-authenticator` / `x86_64`.

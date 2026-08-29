@@ -113,14 +113,14 @@ modules:
   #   02-install-kitty   tmux   nushell
   #   00b-install-polkit-agent (mate-polkit)
   #   01a-install-syncthing
-  #   04-install-niri  (niri + waybar + supporting tools, via yalter/niri COPR)
+  #   04-install-niri  (niri + waybar + supporting tools from Fedora)
   #   02-install-espanso (espanso-wayland via Terra)
-  #   11-install-hyprlock-stack (hyprlock from Terra, swayidle from Fedora)
-  #   05-install-noctalia (noctalia-shell-v5 from lionheartp/Hyprland COPR)
+  #   11-install-hyprlock-stack (hyprlock from package-scoped COPR, swayidle from Fedora)
+  #   05-install-noctalia (noctalia from Fedora)
   # ---------------------------------------------------------------------------
   - type: rpm-ostree
     repos:
-      # Terra (espanso-wayland, hyprlock, helium-browser-bin) is NOT fetched
+      # Terra (espanso-wayland, helium-browser-bin, zed) is NOT fetched
       # over the network here — repos.fyralabs.com had a multi-hour outage on
       # 2026-06-03 that killed the build mid-rpm-ostree (key.asc 30s timeout).
       # Ship our own terra.repo at files/system/etc/yum.repos.d/terra.repo
@@ -128,18 +128,6 @@ modules:
       # points gpgkey= at a baked key under /etc/pki/rpm-gpg/. The file is
       # placed by the `files` module which runs before rpm-ostree, so the
       # repo is already on disk when this step runs.
-      # niri compositor + supporting tools
-      - https://copr.fedorainfracloud.org/coprs/yalter/niri/repo/fedora-%OS_VERSION%/yalter-niri-fedora-%OS_VERSION%.repo
-      # noctalia-shell-v5
-      - https://copr.fedorainfracloud.org/coprs/lionheartp/Hyprland/repo/fedora-%OS_VERSION%/lionheartp-Hyprland-fedora-%OS_VERSION%.repo
-      # nushell (Phase 2.5) — replaces the Homebrew-managed nushell as the
-      # system shell. Shells are system-integration-sensitive (PAM,
-      # /etc/shells, terminal launcher) and brew-managed paths are awkward
-      # for default shells, so we bake.
-      - https://copr.fedorainfracloud.org/coprs/atim/nushell/repo/fedora-%OS_VERSION%/atim-nushell-fedora-%OS_VERSION%.repo
-      # swayosd (Phase 2.5) — OSD for volume/brightness/caps-lock under niri,
-      # part of the WM stack per AGENTS.md.
-      - https://copr.fedorainfracloud.org/coprs/celestelove/SwayOSD/repo/fedora-%OS_VERSION%/celestelove-SwayOSD-fedora-%OS_VERSION%.repo
       # NOTE: Obsidian deferred to Phase 3b — alxhr0/Obsidian COPR was 404 as
       # of 2026-05-22 (GPG pubkey URL returns 404). Will install via AppImage
       # extract in Phase 3b alongside Polypane.
@@ -148,7 +136,7 @@ modules:
       # Zen release binaries. Fallback: firminunderscore/zen-browser.
       - https://copr.fedorainfracloud.org/coprs/sneexy/zen-browser/repo/fedora-%OS_VERSION%/sneexy-zen-browser-fedora-%OS_VERSION%.repo
       # Zed editor (Phase 3c) — sourced from Terra (already enabled above for
-      # espanso-wayland/hyprlock/helium-browser-bin), NOT a dedicated COPR.
+      # espanso-wayland/helium-browser-bin), NOT a dedicated COPR.
       # History: we used the che/zed COPR until 2026-06-14. Both Terra and
       # che/zed ship a package literally named `zed`, so dnf resolved the
       # install to whichever had the higher version. Terra's `zed` is
@@ -181,7 +169,7 @@ modules:
       - mate-polkit
       - syncthing
       - swayidle
-      # niri COPR
+      # Fedora compositor + supporting tools
       - niri
       - waybar
       - pavucontrol
@@ -190,12 +178,12 @@ modules:
       - SwayNotificationCenter   # binary: swaync
       # Terra
       - espanso-wayland
+      # Package-scoped lionheartp/Hyprland repo from baked hyprlock.repo.
       - hyprlock
-      # lionheartp/Hyprland COPR
-      - noctalia-shell-v5
-      # Phase 2.5 COPRs
-      - nushell
-      - swayosd
+      # Fedora 44+ official package; follows tagged v5 beta releases through updates.
+      - noctalia
+      # Nushell is installed from its checksummed upstream release below.
+      # SwayOSD removed: no service/config used it; Noctalia owns every OSD keybind.
       # nwg-displays runtime + build deps (the package itself is installed
       # from upstream tarball via install-nwg-displays-latest.sh below —
       # COPR tofik/nwg-shell is stuck on v0.3.28 which predates niri support).
@@ -244,6 +232,15 @@ modules:
       # All four live in user's distrobox toolbox setup (out of scope of this repo).
 
   # ---------------------------------------------------------------------------
+  # Nushell — latest tagged upstream binary; GitHub asset digest and upstream
+  # SHA256SUMS must agree (integrity check; upstream publishes no signature).
+  # Replaces atim/nushell COPR, which stopped producing current Fedora builds.
+  # ---------------------------------------------------------------------------
+  - type: script
+    scripts:
+      - install-nushell-latest.sh
+
+  # ---------------------------------------------------------------------------
   # Phase 3d — OBS Studio + v4l2loopback (virtual camera).
   #
   # v4l2loopback (kernel module for the OBS virtual camera, exposing a
@@ -289,24 +286,17 @@ modules:
   # special-casing. Access to /dev/input is gated by a polkit rule shipped
   # in the RPM (so no input-group membership trap on the host).
   #
-  # COPR `pesader/showmethekey` is the endorsed Fedora path. Verified
-  # 2026-05-30 that fedora-44 has built RPMs at v1.17.0-2. This pre-dates
-  # the v1.19.0 polkit hardening that narrowed the allow rule to
-  # local-active-session only; on these single-user laptops the broader
-  # 1.17.0 rule is acceptable (no second local account exists to abuse it).
-  # Revisit if pesader bumps to >=1.19.0 — RECIPE.md row tracks the version.
-  #
-  # The COPR .repo file declares `gpgkey=` so dnf fetches the key at install
-  # time; no separate `keys:` entry needed (matches existing niri / Hyprland
-  # / zen-browser COPRs above).
+  # Upstream-endorsed `pesader/showmethekey` stalled at v1.17.0 from 2024.
+  # Use current v1.21.0 build from `barsnick/non-fed`; its broad COPR is exposed
+  # through our baked showmethekey.repo with `includepkgs=showmethekey*`, so it
+  # cannot override unrelated Fedora packages. v1.21 includes the post-v1.19
+  # polkit hardening missing from the old package.
   #
   # Startup invocation (`spawn-at-startup "showmethekey-gtk" "-kAC"`) and
   # any toggle keybind live in dotfiles' niri/config.kdl.tmpl — this image
   # only provides the binary + polkit rule.
   # ---------------------------------------------------------------------------
   - type: rpm-ostree
-    repos:
-      - https://copr.fedorainfracloud.org/coprs/pesader/showmethekey/repo/fedora-%OS_VERSION%/pesader-showmethekey-fedora-%OS_VERSION%.repo
     install:
       - showmethekey
 
