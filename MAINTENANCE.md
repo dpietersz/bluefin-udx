@@ -47,6 +47,9 @@ A failure breaks the image build. Renovate does **not** understand COPR or vendo
 
 The nightly workflow pre-resolves both Proton products' current stable URL and checksum into `build-pins.env`, so a new release changes the build context and refreshes both images automatically. A malformed or empty manifest must fail the build rather than silently retain an old package.
 
+**RPM Fusion Free (package-scoped):**
+- [ ] `telegram-desktop` — compare the Fedora package in the base and updates repositories with https://github.com/telegramdesktop/tdesktop/releases/latest. Confirm `files/system/etc/yum.repos.d/rpmfusion-free-telegram.repo` still limits both sections to `includepkgs=telegram-desktop*`, package vendor remains `RPM Fusion`, and baked key fingerprint remains `E9A4 91A3 DE24 7814 E7E0 67EA E06F 8ECD D651 FF2E`. A modest packaging delay is acceptable; investigate prolonged lag or a missing package for the current Fedora release.
+
 ### 4. Upstream movement
 - [ ] Has Zen Browser stabilized enough to ship an official RPM? If yes, drop `sneexy/`.
 - [ ] Has Helium graduated out of Terra into its own vendor repo?

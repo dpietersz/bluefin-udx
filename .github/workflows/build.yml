@@ -469,6 +469,51 @@ jobs:
             for p in chromium browserpass browserpass-chromium zen-browser helium-browser-bin; do
                 check_rpm "$p"
             done
+            echo "Phase 3g Telegram Desktop:"
+            check_rpm telegram-desktop
+            check_rpm_vendor telegram-desktop "RPM Fusion"
+            check_bin Telegram
+            check_file /usr/share/applications/org.telegram.desktop.desktop
+            check_file /usr/share/dbus-1/services/org.telegram.desktop.service
+            check_file /etc/yum.repos.d/rpmfusion-free-telegram.repo
+            check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-rpmfusion-free-fedora-2020
+            TELEGRAM_REPOS_OK=1
+            for TELEGRAM_REPO_SECTION in rpmfusion-free-telegram rpmfusion-free-telegram-updates; do
+                if [ "$(grep -Fxc "[$TELEGRAM_REPO_SECTION]" /etc/yum.repos.d/rpmfusion-free-telegram.repo || true)" -ne 1 ]; then
+                    echo "  FAIL  Telegram repo section $TELEGRAM_REPO_SECTION missing or duplicated"
+                    FAIL=1
+                    TELEGRAM_REPOS_OK=0
+                    continue
+                fi
+                TELEGRAM_REPO_BLOCK=$(sed -n "/^\\[$TELEGRAM_REPO_SECTION\\]$/,/^\\[/p" /etc/yum.repos.d/rpmfusion-free-telegram.repo)
+                for TELEGRAM_REPO_SETTING in \
+                    "includepkgs=telegram-desktop*" \
+                    "gpgcheck=1" \
+                    "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rpmfusion-free-fedora-2020"; do
+                    if ! printf "%s\n" "$TELEGRAM_REPO_BLOCK" | grep -Fxq "$TELEGRAM_REPO_SETTING"; then
+                        echo "  FAIL  $TELEGRAM_REPO_SECTION missing $TELEGRAM_REPO_SETTING"
+                        FAIL=1
+                        TELEGRAM_REPOS_OK=0
+                    fi
+                done
+            done
+            if [ "$TELEGRAM_REPOS_OK" -eq 1 ]; then
+                echo "  ok    RPM Fusion Telegram repos individually scoped and signature-checked"
+            fi
+            TELEGRAM_KEY_SHA256=$(sha256sum /etc/pki/rpm-gpg/RPM-GPG-KEY-rpmfusion-free-fedora-2020 | cut -d " " -f 1)
+            if [ "$TELEGRAM_KEY_SHA256" = "10fc0a3e1a0307e8088357a31a9c5e4e3d9f9e0b01db2b03b5790d949a47f3b3" ]; then
+                echo "  ok    RPM Fusion signing key checksum"
+            else
+                echo "  FAIL  RPM Fusion signing key checksum mismatch"
+                FAIL=1
+            fi
+            if ldd /usr/bin/Telegram 2>&1 | grep -q "not found"; then
+                echo "  FAIL  Telegram has unresolved shared libraries"
+                ldd /usr/bin/Telegram 2>&1 | grep "not found" || true
+                FAIL=1
+            else
+                echo "  ok    Telegram shared libraries resolved"
+            fi
             echo "Phase 3b GUI apps:"
             check_rpm beekeeper-studio
             echo "Proton Authenticator:"

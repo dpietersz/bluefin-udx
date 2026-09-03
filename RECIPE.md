@@ -93,6 +93,14 @@ User-layer config (`xdg-desktop-portal` config, OBS profile templated per machin
 
 Build/smoke checks prove package identity, OCR language discovery, GSR CLI contract, linked libraries, and the privileged helper capability. They cannot prove hardware encoding or live PipeWire routing inside a container with no compositor, GPU, microphone, or active audio graph. After deployment, test one fullscreen recording on each laptop and verify H.264 plus audible system/microphone content; quarterly instructions live in `MAINTENANCE.md`.
 
+### Phase 3g (current — Telegram Desktop)
+
+| Package | Source | Maintained by | Why baked | Fallback if source dies | Last reviewed |
+|---|---|---|---|---|---|
+| `telegram-desktop` | package-scoped RPM Fusion Free base + updates repositories; signed with RPM Fusion Fedora key `E9A4 91A3 DE24 7814 E7E0 67EA E06F 8ECD D651 FF2E` | RPM Fusion | system-integration — established daily communication app; host-native PipeWire calls/media, notifications, `tg://` deep links, session D-Bus activation, launcher, and MIME integration. Repository is constrained with `includepkgs=telegram-desktop*` so it cannot compete with Bluefin's Negativo17 FFmpeg/Mesa stack. | move Arch's official `telegram-desktop` package into `udx-toolbox`, or install Telegram's official Linux tarball user-scope | 2026-09-03 |
+
+RPM Fusion has packaged Telegram Desktop since 2017. Its release cadence can trail upstream; the quarterly check compares versions but does not bypass RPM signature verification or install an unreviewed upstream binary. The package adds about 147 MiB to the image. No user configuration is baked.
+
 ### Current standalone Proton GUI packages
 
 | Package | Source | Maintained by | Why baked | Fallback if source dies | Last reviewed |

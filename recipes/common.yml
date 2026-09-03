@@ -204,6 +204,9 @@ modules:
       - zen-browser             # sneexy/zen-browser COPR
       - helium-browser-bin      # Terra (already enabled)
       - zed                     # Terra — code editor (binary: zeditor; see repo comment)
+      # RPM Fusion Free through baked package-scoped base + updates repos.
+      # Scope prevents conflicts with Bluefin's Negativo17 multimedia stack.
+      - telegram-desktop        # binary: Telegram; host-native calls/notifications/deep links
       # Phase 3b — vendor yum repos
       - beekeeper-studio        # rpm.beekeeperstudio.io vendor repo
       # Phase 3c — Fedora base CLI essentials baked
