@@ -255,6 +255,12 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     check_bin gsr-kms-server
     check_file /etc/yum.repos.d/gpu-screen-recorder.repo
     check_rpm_vendor gpu-screen-recorder "Fedora Copr - user lionheartp"
+    if grep -qx "excludepkgs=gpu-screen-recorder" /etc/yum.repos.d/terra.repo; then
+        echo "  ok    gpu-screen-recorder excluded from competing Terra repo"
+    else
+        echo "  FAIL  Terra can override the approved gpu-screen-recorder source"
+        FAIL=1
+    fi
     if grep -qx "includepkgs=gpu-screen-recorder" /etc/yum.repos.d/gpu-screen-recorder.repo; then
         echo "  ok    gpu-screen-recorder COPR is exact-package scoped"
     else
