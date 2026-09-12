@@ -70,7 +70,13 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     }
 
     echo "Phase 0 bootstrap binaries:"
-    for bin in pass gpg age ssh git jq curl; do check_bin "$bin"; done
+    for bin in pass gpg pinentry-curses age ssh git jq curl; do check_bin "$bin"; done
+    check_rpm pinentry
+    # Presence/ownership only: never invoke pinentry in an unattended smoke test.
+    if [ "$(rpm -qf --qf "%{NAME}" /usr/bin/pinentry-curses)" != pinentry ]; then
+        echo "  FAIL  pinentry-curses must come from the Fedora pinentry package"
+        FAIL=1
+    fi
 
     echo "Phase 0 Teams (in /opt, first-boot reflected — check rpm + real path):"
     check_rpm teams-for-linux

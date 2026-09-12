@@ -28,6 +28,7 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 |---|---|---|---|---|---|
 | `pass` | Fedora repo | Fedora | bootstrap | n/a (Fedora repo) | 2026-05-22 |
 | `gnupg2` | Fedora repo | Fedora | bootstrap | n/a | 2026-05-22 |
+| `pinentry` | Fedora repo | Fedora | bootstrap — guarantees `/usr/bin/pinentry-curses` for terminal-only GPG prompts; dotfiles owns selection and cache policy. Already supplied by the base, now an explicit dependency on both variants. | n/a (Fedora repo); never silently select a GUI prompt | 2026-09-11 |
 | `age` | Fedora repo | Fedora | bootstrap (decrypts keys in chezmoi `08-decrypt-keys`) | switch to vendor binary release | 2026-05-22 |
 | `openssh-clients` | Fedora repo | Fedora | bootstrap | n/a | 2026-05-22 |
 | `git` | Fedora repo | Fedora | bootstrap | n/a | 2026-05-22 |

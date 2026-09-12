@@ -8,6 +8,7 @@ on:
     paths:
       - "recipes/**"
       - "scripts/**"
+      - "tests/**"
       - "files/**"
       - "cosign.pub"
       - ".github/workflows/build.yml"
@@ -41,6 +42,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Test COPR freshness audit
+        run: python3 -m unittest discover -s tests -p 'test_audit_copr_freshness.py'
 
       - name: Audit COPR package freshness
         env:
@@ -434,7 +438,13 @@ jobs:
             fi
             echo "  ok    rpmdb readable ($(rpm -qa | wc -l) packages)"
             echo "Phase 0 bootstrap binaries:"
-            for bin in pass gpg age ssh git jq curl; do check_bin "$bin"; done
+            for bin in pass gpg pinentry-curses age ssh git jq curl; do check_bin "$bin"; done
+            check_rpm pinentry
+            # Presence/ownership only: never invoke pinentry in an unattended smoke test.
+            if [ "$(rpm -qf --qf "%{NAME}" /usr/bin/pinentry-curses)" != pinentry ]; then
+                echo "  FAIL  pinentry-curses must come from the Fedora pinentry package"
+                FAIL=1
+            fi
             # Bluefin /opt -> /var/opt (first-boot populated). Inside docker/podman
             # run the runtime symlink chain dead-ends; verify rpm + real path instead.
             echo "Phase 0 Teams:"

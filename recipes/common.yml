@@ -30,6 +30,8 @@ modules:
       # bootstrap-critical: dotfiles assumes these are present at first apply
       - pass
       - gnupg2
+      # Concrete terminal pinentry; dotfiles selects pinentry-curses explicitly.
+      - pinentry
       - age
       - openssh-clients
       - git

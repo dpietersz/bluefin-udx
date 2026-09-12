@@ -20,6 +20,8 @@ Check the **specific package page**, never only the parent project. Active multi
 
 If a package is behind upstream—not merely old because upstream itself is quiet—switch to the documented fallback. Never infer package freshness from a COPR project's newest unrelated build. `scripts/audit-copr-freshness.sh` enforces this comparison in nightly CI after a seven-day packaging grace period; keep its package map aligned with every baked COPR.
 
+The `gpu-screen-recorder` audit selects the package's `fedora-44-x86_64` entry from COPR's monitor API and verifies that build's chroot status and completion time. Do not use `builds.latest`: a newer Rawhide-only rebuild caused false failures on 2026-09-10/11 despite a current, successful Fedora 44 build. The seven-day version grace and 90-day build-age limit still apply. Run offline regression checks with `python3 -m unittest discover -s tests -p 'test_audit_copr_freshness.py'` (also run in CI).
+
 **Direct upstream release installs:**
 - [ ] `nushell` — https://github.com/nushell/nushell/releases/latest — confirm the release still ships `nu-<version>-x86_64-unknown-linux-gnu.tar.gz` plus `SHA256SUMS`, GitHub's asset digest matches that manifest, and CI/local installs report the same version. Nushell currently publishes no independent artifact signature; re-check quarterly and adopt one if offered.
 - [ ] `nwg-displays` — https://github.com/nwg-piotr/nwg-displays/tags — confirm latest tag still builds into `/usr/bin`, `/usr/lib/pythonX.Y/site-packages`, and `/usr/share`. Re-check whether `tofik/nwg-shell` has caught up to ≥0.4.0; prefer Fedora packaging once it is current.

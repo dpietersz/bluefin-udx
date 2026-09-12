@@ -57,7 +57,8 @@ check_package() {
 check_cgit_meson_package() {
   local owner=$1 project=$2 package=$3 meson_url=$4 atom_url=$5
   local meson atom upstream_version upstream_published copr_json copr_version
-  local copr_normalized build_state has_f44 build_ended build_age_days release_age_days
+  local copr_normalized build_id build_json build_state build_ended build_age_days release_age_days
+  local chroot=fedora-44-x86_64
 
   meson=$("${CURL[@]}" "$meson_url")
   upstream_version=$(sed -nE "s/^project\\('gpu-screen-recorder', 'c', version : '([^']+)'.*/\\1/p" <<< "$meson")
@@ -72,20 +73,32 @@ check_cgit_meson_package() {
     }
   ' <<< "$atom")
 
+  # A newer submission may rebuild only Rawhide. Select this package's target
+  # chroot, not the project-wide latest submission or its aggregate build state.
   copr_json=$("${CURL[@]}" \
-    "https://copr.fedorainfracloud.org/api_3/package?ownername=${owner}&projectname=${project}&packagename=${package}&with_latest_build=true")
-  copr_version=$(jq -r '.builds.latest.source_package.version // empty' <<< "$copr_json")
+    "https://copr.fedorainfracloud.org/api_3/monitor?ownername=${owner}&projectname=${project}") || return 1
+  copr_json=$(jq -c --arg package "$package" --arg chroot "$chroot" \
+    '.packages[]? | select(.name == $package) | .chroots[$chroot] // empty' <<< "$copr_json") || return 1
+  copr_version=$(jq -r '.pkg_version // empty' <<< "$copr_json")
   copr_normalized=$(normalize_version <<< "$copr_version")
-  build_state=$(jq -r '.builds.latest.state // empty' <<< "$copr_json")
-  has_f44=$(jq -r '.builds.latest.chroots | index("fedora-44-x86_64") != null' <<< "$copr_json")
-  build_ended=$(jq -r '.builds.latest.ended_on // empty' <<< "$copr_json")
+  build_id=$(jq -r '.build_id // empty' <<< "$copr_json")
+  build_state=$(jq -r '.state // empty' <<< "$copr_json")
 
-  if [ -z "$upstream_version" ] || [ -z "$upstream_published" ] || [ -z "$copr_normalized" ] || [ -z "$build_ended" ]; then
-    echo "ERROR: could not resolve freshness metadata for ${owner}/${project} :: ${package}" >&2
+  if [ -z "$upstream_version" ] || [ -z "$upstream_published" ] || [ -z "$copr_normalized" ] || [[ ! "$build_id" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: could not resolve freshness metadata for ${owner}/${project} :: ${package} (${chroot})" >&2
     return 1
   fi
-  if [ "$build_state" != "succeeded" ] || [ "$has_f44" != "true" ]; then
-    echo "ERROR: latest ${package} build is not a successful Fedora 44 x86_64 build" >&2
+  if [ "$build_state" != "succeeded" ]; then
+    echo "ERROR: latest ${package} build for ${chroot} is not successful (${build_state})" >&2
+    return 1
+  fi
+
+  build_json=$("${CURL[@]}" \
+    "https://copr.fedorainfracloud.org/api_3/build-chroot?build_id=${build_id}&chrootname=${chroot}") || return 1
+  build_state=$(jq -r '.state // empty' <<< "$build_json")
+  build_ended=$(jq -r '.ended_on // empty' <<< "$build_json")
+  if [ "$build_state" != "succeeded" ] || [[ ! "$build_ended" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: could not verify successful ${package} build ${build_id} for ${chroot}" >&2
     return 1
   fi
 
@@ -96,7 +109,7 @@ check_cgit_meson_package() {
   fi
 
   if [ "$copr_normalized" = "$upstream_version" ]; then
-    echo "ok: ${package} COPR=${copr_version} upstream=${upstream_version} build_age=${build_age_days}d"
+    echo "ok: ${package} COPR=${copr_version} upstream=${upstream_version} chroot=${chroot} build=${build_id} build_age=${build_age_days}d"
     return 0
   fi
 
