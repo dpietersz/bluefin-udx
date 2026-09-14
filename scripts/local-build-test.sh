@@ -352,10 +352,11 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     echo "  ok    polkit rule shipped"
 
     # Fontconfig. ALWAYS use /usr/bin/fc-* explicitly: on a dev host, Homebrew
-    # fontconfig 2.18 sits first on PATH, reads its OWN fonts.conf, cannot read
-    # the system cache-9 files, and reports HEALTHY while the system fontconfig
-    # (the one Helium/Electron link) sees zero fonts. A bare fc-list here would
-    # be a green light on a broken image.
+    # fontconfig 2.18 sits first on PATH, reads its OWN fonts.conf and cache
+    # format, and can report HEALTHY while the image system fontconfig sees zero
+    # fonts. Helium can map more than one cache format, so never infer runtime
+    # health from a single cache suffix. A bare fc-list here would be a green
+    # light on a broken image.
     #
     # NOTE: this block runs inside a single-quoted run -c wrapper. Use ONLY
     # double quotes. No apostrophes in comments either - they break the wrapper.
@@ -377,15 +378,13 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
         echo "  ok    fc-match serif is not a Nerd Font"
     fi
 
-    # Container-collision fix. distrobox shares $HOME, so ~/.cache/fontconfig is
-    # shared with every toolbox; fontconfig keys caches on md5(dir path) and
-    # /usr/share/fonts means something different inside an Ubuntu box. Cachedir
-    # ORDER cannot save us (conf.d is included before the cachedir block, so
-    # /var/cache/fontconfig can only be FIRST, and first loses). The fix is the
-    # epoch stamp, which triggers the fontconfig OSTree branch in FcCacheTimeValid
-    # and wins from any position. See fc-cache-boot.sh for the evidence table.
+    # Container-collision hardening. distrobox shares $HOME, but its system font
+    # tree differs from the host. 06-bluefin-host-font-dir-salt.conf gives every
+    # host system font directory a distinct cache key at every cache version.
+    # The epoch stamp remains composefs cache hygiene, not the collision boundary.
     echo "Fontconfig - container-collision hardening:"
     check_file /etc/fonts/conf.d/05-bluefin-writable-cache.conf
+    check_file /etc/fonts/conf.d/06-bluefin-host-font-dir-salt.conf
     check_file /usr/lib/tmpfiles.d/fontconfig-var-cache.conf
     check_file /usr/lib/systemd/system/fc-cache-boot.service
     check_file /usr/libexec/bluefin-udx/fc-cache-boot.sh
@@ -402,25 +401,35 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     else
         echo "  MISS  /var/cache/fontconfig cachedir element missing"; FAIL=1
     fi
-    # The epoch stamp IS the fix - assert it is actually still in the script.
+    if grep -Eq "^[[:space:]]*<reset-dirs" /etc/fonts/conf.d/06-bluefin-host-font-dir-salt.conf; then
+        echo "  MISS  host font salt resets configured directories"; FAIL=1
+    fi
+    for FONT_DIR in /usr/share/fonts /usr/local/share/fonts /usr/share/X11/fonts/Type1 /usr/share/X11/fonts/TTF; do
+        if grep -Fxq "  <dir salt=\"bluefin-udx-host\">$FONT_DIR</dir>" /etc/fonts/conf.d/06-bluefin-host-font-dir-salt.conf; then
+            echo "  ok    salted host font directory $FONT_DIR"
+        else
+            echo "  MISS  salted host font directory $FONT_DIR"; FAIL=1
+        fi
+    done
     if grep -q "touch -d @0" /usr/libexec/bluefin-udx/fc-cache-boot.sh; then
-        echo "  ok    boot script epoch-stamps the cache"
+        echo "  ok    boot script retains the epoch stamp"
     else
-        echo "  MISS  boot script no longer epoch-stamps - container-collision fix is GONE"; FAIL=1
+        echo "  MISS  boot script no longer epoch-stamps the cache"; FAIL=1
     fi
     # The baked cache must survive into the image. It used to land in /var and be
     # deleted by post_build.sh, making the build-time bake a silent no-op.
-    if ls /usr/lib/fontconfig/cache/*.cache-* >/dev/null 2>&1; then
-        echo "  ok    baked cache present in /usr/lib/fontconfig/cache"
+    ROOT_KEY=$(printf %s /usr/share/fontsbluefin-udx-host | md5sum | cut -d " " -f1)
+    if compgen -G "/usr/lib/fontconfig/cache/${ROOT_KEY}-*.cache-*" >/dev/null; then
+        echo "  ok    salted root cache baked in /usr/lib/fontconfig/cache"
     else
-        echo "  MISS  /usr/lib/fontconfig/cache has no cache files - build-time bake was a no-op"; FAIL=1
+        echo "  MISS  salted root cache missing from /usr/lib/fontconfig/cache"; FAIL=1
     fi
-    # Version coupling: the epoch trick is verified on fontconfig 2.17. On 2.18 the
-    # selection rule changes to newest-mtime-wins. Warn loudly on a major bump.
+    # The host directory salt is version-neutral; retain a warning for the
+    # secondary epoch-stamp selection behavior when fontconfig changes.
     FC_VER=$(/usr/bin/fc-cache --version 2>&1 | grep -oE "[0-9]+[.][0-9]+" | head -1)
     case "$FC_VER" in
-        2.17|2.16|2.15) echo "  ok    fontconfig $FC_VER (epoch-stamp behaviour verified)" ;;
-        *) echo "  WARN  fontconfig $FC_VER - epoch-stamp fix verified on 2.17 only; RE-VERIFY (see fc-cache-boot.sh caveat)" ;;
+        2.17|2.16|2.15) echo "  ok    fontconfig $FC_VER (epoch-stamp behavior verified)" ;;
+        *) echo "  WARN  fontconfig $FC_VER - re-verify secondary epoch-stamp behavior; directory salt remains required" ;;
     esac
 
     # NVIDIA variant adds nvtop. CUDA toolkit intentionally not baked —

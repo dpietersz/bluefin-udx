@@ -46,6 +46,14 @@ jobs:
       - name: Test COPR freshness audit
         run: python3 -m unittest discover -s tests -p 'test_audit_copr_freshness.py'
 
+      - name: Test fontconfig host namespace
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap fontconfig fonts-dejavu-core fonts-noto-color-emoji
+          # Root only inside this disposable CI VM: Ubuntu restricts unprivileged
+          # user namespaces. The test still isolates all font/cache writes.
+          sudo bash tests/test_fontconfig_namespace.sh
+
       - name: Audit COPR package freshness
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -725,19 +733,31 @@ jobs:
             else
                 echo "  ok    fc-match serif is not a Nerd Font"
             fi
-            # Container-collision fix (distrobox shares $HOME -> shared
-            # ~/.cache/fontconfig; fontconfig keys caches on md5(dir path)).
-            # The epoch stamp is the fix - assert it is still present.
+            # Container-collision hardening: the host directory salt is the
+            # boundary; the epoch stamp remains composefs cache hygiene.
+            check_file /etc/fonts/conf.d/05-bluefin-writable-cache.conf
+            check_file /etc/fonts/conf.d/06-bluefin-host-font-dir-salt.conf
             check_file /usr/libexec/bluefin-udx/fc-cache-boot.sh
-            if grep -q "touch -d @0" /usr/libexec/bluefin-udx/fc-cache-boot.sh; then
-                echo "  ok    boot script epoch-stamps the cache"
-            else
-                echo "  MISS  boot script no longer epoch-stamps - container-collision fix is GONE"; FAIL=1
+            if grep -Eq "^[[:space:]]*<reset-dirs" /etc/fonts/conf.d/06-bluefin-host-font-dir-salt.conf; then
+                echo "  MISS  host font salt resets configured directories"; FAIL=1
             fi
-            if ls /usr/lib/fontconfig/cache/*.cache-* >/dev/null 2>&1; then
-                echo "  ok    baked cache present in /usr/lib/fontconfig/cache"
+            for FONT_DIR in /usr/share/fonts /usr/local/share/fonts /usr/share/X11/fonts/Type1 /usr/share/X11/fonts/TTF; do
+                if grep -Fxq "  <dir salt=\"bluefin-udx-host\">$FONT_DIR</dir>" /etc/fonts/conf.d/06-bluefin-host-font-dir-salt.conf; then
+                    echo "  ok    salted host font directory $FONT_DIR"
+                else
+                    echo "  MISS  salted host font directory $FONT_DIR"; FAIL=1
+                fi
+            done
+            if grep -q "touch -d @0" /usr/libexec/bluefin-udx/fc-cache-boot.sh; then
+                echo "  ok    boot script retains the epoch stamp"
             else
-                echo "  MISS  /usr/lib/fontconfig/cache empty - build-time bake was a no-op"; FAIL=1
+                echo "  MISS  boot script no longer epoch-stamps the cache"; FAIL=1
+            fi
+            ROOT_KEY=$(printf %s /usr/share/fontsbluefin-udx-host | md5sum | cut -d " " -f1)
+            if compgen -G "/usr/lib/fontconfig/cache/${ROOT_KEY}-*.cache-*" >/dev/null; then
+                echo "  ok    salted root cache baked in /usr/lib/fontconfig/cache"
+            else
+                echo "  MISS  salted root cache missing from /usr/lib/fontconfig/cache"; FAIL=1
             fi
             # NOTE: this smoke test runs in a plain OCI container, NOT composefs,
             # and has no shared $HOME - so it structurally CANNOT reproduce the

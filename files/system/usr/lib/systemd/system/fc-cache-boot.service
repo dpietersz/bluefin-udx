@@ -1,22 +1,12 @@
 [Unit]
 Description=Rebuild and epoch-stamp the system fontconfig cache before the graphical session
 Documentation=man:fc-cache(1)
-Documentation=https://github.com/89luca89/distrobox/issues/1945
-# WHY (read before deleting): distrobox shares the host $HOME with every toolbox,
-# so ~/.cache/fontconfig is ONE directory used by the host and all containers.
-# fontconfig keys cache files on md5(<absolute dir path>), and /usr/share/fonts
-# means something completely different inside an Ubuntu toolbox than it does on
-# the host. A container touching fonts therefore writes a ~216-byte cache under
-# the host's exact key, and every baked system font goes invisible on the host —
-# Chromium/Electron then render `serif` as a Nerd Font (wrong serif, wide digits,
-# tofu).
+# distrobox shares ~/.cache/fontconfig with the host while its /usr/share/fonts
+# is different. 06-bluefin-host-font-dir-salt.conf isolates host system font
+# cache keys from unsalted container keys at every cache format version.
 #
-# The fix is NOT cachedir ordering (conf.d is included before the cachedir block,
-# so /var/cache/fontconfig can only be FIRST, and first loses). The fix is to
-# stamp our cache files to the UNIX epoch, which triggers fontconfig's OSTree
-# accommodation in FcCacheTimeValid/FcDirCacheMapHelper and wins from any
-# position. Full rationale, the measured evidence table, and the fontconfig 2.18
-# caveat live in the script below — read it before changing anything here.
+# This unit rebuilds the writable /var cache and retains its composefs-friendly
+# epoch stamp. The stamp is not the collision boundary; the directory salt is.
 After=local-fs.target systemd-tmpfiles-setup.service
 Before=display-manager.service
 ConditionPathExists=/usr/bin/fc-cache

@@ -335,16 +335,11 @@ modules:
   # detecting the gap. Force one system cache rebuild here so Chromium-family and
   # GTK fontconfig clients resolve emoji correctly on first boot.
   #
-  # NOTE: this build-time pass is NOT sufficient on its own — ostree/composefs
-  # gives /usr/share/fonts an epoch checksum at runtime. If any fc-cache runs
-  # while that dir isn't fully materialized it writes a valid-but-EMPTY cache
-  # that validates forever, hiding the real serif fonts so Chromium/Electron fall
-  # to a Nerd Font for `serif` (monospace digits + wrong serif + tofu). The
-  # system-cache half is the guarded fc-cache-boot.service below; the
-  # authoritative repair is the user-scope verify-and-heal in dotfiles
-  # (refresh-fontconfig-cache.service -> ~/.local/bin/scripts/fontconfig-heal.sh),
-  # which rebuilds ~/.cache until real fonts are visible and survives both image
-  # updates and chezmoi apply.
+  # Host system font directories are separately salted by
+  # 06-bluefin-host-font-dir-salt.conf. The salt changes their cache keys, so
+  # containers sharing $HOME cannot collide with them at any cache version.
+  # The boot service below remains responsible for a guarded runtime rebuild and
+  # the composefs-friendly epoch stamp; it does not clear user cache state.
   # ---------------------------------------------------------------------------
   - type: script
     scripts:
@@ -352,13 +347,12 @@ modules:
 
   # ---------------------------------------------------------------------------
   # Enable the boot-time fontconfig cache rebuild.
-  # Unit + cachedir conf + tmpfiles dir ship via the `files` module
-  # (files/system/...). The service does a guarded `fc-cache --force` into
-  # /var/cache/fontconfig early at every boot, Before=display-manager.service: it
-  # verifies a canary font is visible afterward and DELETES the cache if the scan
-  # came up empty, so it can never publish a poisoned valid-empty cache (the bug
-  # the old `--system-only` variant caused). See the unit header and
-  # files/system/etc/fonts/conf.d/05-bluefin-writable-cache.conf.
+  # Unit, writable cachedir, host directory salt, and tmpfiles dir ship via the
+  # `files` module (files/system/...). The service does a guarded `fc-cache
+  # --force` into /var/cache/fontconfig early at every boot,
+  # Before=display-manager.service: it verifies a canary font is visible and
+  # deletes only that system cache if the scan came up empty. See the unit and
+  # 06-bluefin-host-font-dir-salt.conf headers.
   # ---------------------------------------------------------------------------
   - type: systemd
     system:

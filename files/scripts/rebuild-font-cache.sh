@@ -16,18 +16,18 @@
 #    script runs, which makes /var/cache/fontconfig the FIRST cachedir at build
 #    time too — so a bare `fc-cache` writes there, and bluebuild's post_build.sh
 #    (`rm -rf /tmp/* /var/* /opt`) then deletes it. The bake was silently a no-op.
-#    We therefore pin the cachedir explicitly with a throwaway FONTCONFIG_FILE.
+#    We therefore put the baked cachedir BEFORE the conf.d include in a
+#    throwaway FONTCONFIG_FILE. Appending it afterward does NOT pin writes:
+#    the included 05 config still takes the first writable slot.
 #
 # 2. `--system-only` is NOT usable: it exits non-zero on this image and produces
 #    an empty cache. It was removed from the boot service for exactly that reason
 #    (commit f0a69fc) but survived here until 2026-08-03.
 #
-# The epoch stamp is the whole point — see the long rationale in
-# files/system/usr/libexec/bluefin-udx/fc-cache-boot.sh. Under composefs
-# /usr/share/fonts has mtime 0, and fontconfig's FcCacheTimeValid short-circuits
-# on `dir_stat->st_mtime == 0`, so an epoch-stamped cache wins font lookups from
-# any cachedir position — including against a cache a distrobox container writes
-# into the shared ~/.cache/fontconfig.
+# /etc/fonts/conf.d/06-bluefin-host-font-dir-salt.conf, included below, is the
+# collision fix: it separates host keys from unsalted container keys.
+# Keep the epoch stamp for composefs cache validation, but do not treat cache
+# selection order or timestamp precedence as the namespace boundary.
 
 # NO pipefail, and this is not an oversight. The canary check below pipes
 # `fc-list | grep -qi`; grep -q exits on the first match and closes the pipe,
@@ -50,10 +50,12 @@ cat > "${CONF}" <<EOF
 <?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
 <fontconfig>
+  <cachedir>${CACHE_DIR}</cachedir>
   <dir>/usr/share/fonts</dir>
   <dir>/usr/local/share/fonts</dir>
+  <dir>/usr/share/X11/fonts/Type1</dir>
+  <dir>/usr/share/X11/fonts/TTF</dir>
   <include ignore_missing="yes">/etc/fonts/conf.d</include>
-  <cachedir>${CACHE_DIR}</cachedir>
 </fontconfig>
 EOF
 
@@ -67,7 +69,15 @@ if ! FONTCONFIG_FILE="${CONF}" fc-list | grep -qi "${CANARY}"; then
     exit 1
 fi
 
-# Epoch-stamp so the baked cache validates and wins under composefs.
+# A visible canary alone can come from /var or an older baked cache. Require
+# the newly salted root cache in the location that survives image cleanup.
+ROOT_KEY=$(printf %s /usr/share/fontsbluefin-udx-host | md5sum | cut -d ' ' -f1)
+if ! compgen -G "${CACHE_DIR}/${ROOT_KEY}-*.cache-*" >/dev/null; then
+    echo "ERROR: salted root font cache missing from ${CACHE_DIR}" >&2
+    exit 1
+fi
+
+# Preserve the composefs-friendly cache timestamp; directory salt isolates it.
 touch -d @0 "${CACHE_DIR}"/*.cache-* 2>/dev/null || true
 
 echo "System fontconfig cache baked and epoch-stamped ($(find "${CACHE_DIR}" -name '*.cache-*' -type f | wc -l) files)"
