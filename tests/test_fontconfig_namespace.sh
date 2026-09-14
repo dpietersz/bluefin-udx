@@ -163,13 +163,19 @@ single_cache_for_directory() {
 # remain available inside the namespace.
 run_fixture() {
   local tree=$1 etc_fonts=$2
+  local -a baked_cache_bind=()
+  # Fedora's baked-cache path does not exist on Ubuntu. Nothing to hide there;
+  # attempting to create its parents under the read-only /usr bind fails.
+  if [ -d /usr/lib/fontconfig/cache ]; then
+    baked_cache_bind=(--bind "${LIB_CACHE}" /usr/lib/fontconfig/cache)
+  fi
   shift 2
   bwrap --die-with-parent --ro-bind / / \
     --bind "${TMP}" "${TMP}" \
     --bind "${tree}" /usr/share/fonts \
     --bind "${etc_fonts}" /etc/fonts \
     --bind "${VAR_CACHE}" /var/cache/fontconfig \
-    --bind "${LIB_CACHE}" /usr/lib/fontconfig/cache \
+    "${baked_cache_bind[@]}" \
     --clearenv \
     --setenv HOME "${USER_HOME}" \
     --setenv XDG_CACHE_HOME "${XDG_CACHE}" \
