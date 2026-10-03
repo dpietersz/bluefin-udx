@@ -77,7 +77,7 @@ recipes/
   bluefin-udx.yml         # Intel/AMD entry point (base: bluefin-dx)
   bluefin-udx-nvidia.yml  # NVIDIA entry point (base: bluefin-dx-nvidia-open)
 files/
-  scripts/                # Inline bluebuild scripts (teams-wayland-patch, install-paseo-latest, install-cosign-policy)
+  scripts/                # Inline bluebuild scripts (teams-wayland-patch, install-cosign-policy)
   system/                 # Overlay copied to image root via the `files` module
     etc/containers/registries.d/dpietersz.yaml   # cosign sigstore mapping
     etc/yum.repos.d/beekeeper-studio.repo        # corrected vendor .repo (upstream points gpgkey at a signature file)

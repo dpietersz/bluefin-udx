@@ -221,7 +221,7 @@ jobs:
       # Pre-resolve external "latest" versions using GITHUB_TOKEN (1000 req/h
       # quota) BEFORE the build, write them to a pin file that the in-build
       # scripts (install-nwg-displays-latest.sh, install-nushell-latest.sh,
-      # install-paseo-latest.sh, install-proton-authenticator-latest.sh,
+      # install-proton-authenticator-latest.sh,
       # install-proton-mail-latest.sh)
       # can pick up from their bluebuild script/files mounts. This avoids the
       # unauthenticated GitHub API rate limit (60/h per IP) hit on 2026-06-03 —
@@ -256,20 +256,6 @@ jobs:
             exit 1
           fi
           NUSHELL_SHA256="$NUSHELL_API_SHA256"
-
-          # Do NOT trust /releases/latest for paseo. getpaseo/paseo has shipped
-          # duplicate tags with empty "latest" releases (2026-06-10: two v0.1.93
-          # releases — the newer id 337050406 with 0 assets, which /releases/latest
-          # resolves to, and id 337050405 carrying Paseo-0.1.93-x86_64.rpm). An
-          # empty PASEO_URL writes an empty pin and the in-build script then aborts.
-          # Resolve across the releases LIST instead and pick the newest stable
-          # (non-draft, non-prerelease) release that ACTUALLY exposes an x86_64.rpm.
-          PASEO_URL=$(gh api "repos/getpaseo/paseo/releases?per_page=100" \
-            --jq '[.[] | select(.draft==false and .prerelease==false) | .assets[] | select(.name | endswith("x86_64.rpm")) | .browser_download_url][0] // empty')
-          if [ -z "$PASEO_URL" ] || [ "$PASEO_URL" = "null" ]; then
-            echo "::error::No getpaseo/paseo release exposes an x86_64.rpm asset — aborting before writing an empty pin"
-            exit 1
-          fi
 
           # Proton ships no DNF repository. Resolve the newest active stable
           # x86_64 RPM and its SHA-512 from the official manifest. Keeping these
@@ -335,7 +321,6 @@ jobs:
             printf 'NWG_DISPLAYS_TAG=%q\n' "$NWG_TAG"
             printf 'NUSHELL_TAG=%q\n' "$NUSHELL_TAG"
             printf 'NUSHELL_SHA256=%q\n' "$NUSHELL_SHA256"
-            printf 'PASEO_RPM_URL=%q\n' "$PASEO_URL"
             printf 'PROTON_AUTHENTICATOR_VERSION=%q\n' "$PROTON_VERSION"
             printf 'PROTON_AUTHENTICATOR_RPM_URL=%q\n' "$PROTON_URL"
             printf 'PROTON_AUTHENTICATOR_SHA512=%q\n' "$PROTON_SHA512"
