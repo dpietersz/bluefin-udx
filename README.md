@@ -53,6 +53,15 @@ What's **not** baked (lives in [chezmoi dotfiles](https://github.com/dpietersz/d
 - macOS apps (Aerospace, Raycast, Granola, ...) — managed by Homebrew
 - `Obsidian`, `Polypane`, `Bruno`, `LocalSend`, `Microsoft Storage Explorer` — distrobox toolbox (companion repo: `udx-orbit`)
 
+### Windows Work / Citrix VM ownership
+
+The local `windows-work` KVM/libvirt guest uses the host virtualization stack;
+its disk, firmware/TPM state, Windows license and Citrix installation are **not**
+baked into this image. Dotfiles owns the desktop launcher and authoritative
+[installation, Windows 11 Pro rebuild, recovery, and removal runbook](https://github.com/dpietersz/dotfiles/blob/main/docs/how-to/windows-work-vm.html)
+(local: `~/dotfiles/docs/how-to/windows-work-vm.html`). Do not recreate the VM on
+OS image updates or remove shared virtualization packages to retire one guest.
+
 ## Using it on your own machine
 
 > **Warning**: You almost certainly don't want this. The package list is mine. Fork the repo and edit `recipes/common.yml` to your own taste before rebasing anything.
