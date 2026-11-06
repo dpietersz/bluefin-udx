@@ -187,6 +187,9 @@ jobs:
       - name: Pin Podman to the distro build on kernel overlay
         uses: ./.github/actions/pin-podman
 
+      - name: Test Vitta group reconciliation
+        run: sudo bash tests/test_vitta_groups.sh
+
       # ----------------------------------------------------------------------
       # Install bluebuild CLI directly so we can drive build/push as separate
       # steps and insert a smoke-boot gate between them.

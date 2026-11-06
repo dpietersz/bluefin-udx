@@ -1,6 +1,6 @@
 # Add every wheel member to the docker and libvirt groups (Vitta replacement
-# for Bluefin's bluefin-dx-groups.service). Idempotent: the helper records a
-# version in /etc/vitta/groups-version and exits early once applied.
+# for Bluefin's bluefin-dx-groups.service). Idempotent: the helper records the
+# one-time group-entry migration and reconciles wheel membership on every run.
 [Unit]
 Description=Add wheel members to the docker and libvirt groups
 After=local-fs.target systemd-sysusers.service

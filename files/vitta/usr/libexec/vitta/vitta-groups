@@ -3,62 +3,92 @@
 #
 # Replaces Bluefin's bluefin-dx-groups (no incus-admin: Vitta ships no Incus).
 # Two fixes over that helper:
-#   - it iterated "for user in $wheelarray", which expands to the FIRST array
-#     element only; every wheel member is handled here;
-#   - a group missing from both databases fails the run without writing the
-#     state file, so the next boot retries instead of silently skipping.
+#   - it reconciles both supplementary and primary wheel-group members;
+#   - a missing target group is logged and retried next boot without failing
+#     the boot.
 #
 # Why the /usr/lib/group step: RPM %pre groupadd during an image build lands in
 # /usr/lib/group (nss-altfiles), which usermod cannot modify. Copy the entry
 # into /etc/group first. Groups created at boot by systemd-sysusers (libvirt)
 # are already in /etc/group and are left alone.
 #
-# Bump GROUPS_VERSION when the group list changes so existing installs re-run.
+# Bump GROUPS_VERSION when the group list changes. The state file records only
+# the one-time /usr/lib/group -> /etc/group migration; membership is reconciled
+# on every run so users added to wheel after first boot are included.
 set -euo pipefail
 
 GROUPS_VERSION=1
 STATE_FILE=/etc/vitta/groups-version
 TARGET_GROUPS=(docker libvirt)
 
-if [[ -f "$STATE_FILE" && "$(<"$STATE_FILE")" == "$GROUPS_VERSION" ]]; then
-  echo "vitta-groups: version $GROUPS_VERSION already applied"
-  exit 0
-fi
+group_entry() {
+  getent group "$1" 2>/dev/null || true
+}
 
 ensure_etc_group() {
   local group="$1" entry
   if grep -q "^${group}:" /etc/group; then
     return 0
   fi
-  if ! entry=$(grep -m1 "^${group}:" /usr/lib/group); then
-    echo "vitta-groups: group $group exists in neither /etc/group nor /usr/lib/group" >&2
+  if ! entry=$(grep -m1 "^${group}:" /usr/lib/group 2>/dev/null); then
+    echo "vitta-groups: group $group is not available yet; skipping it" >&2
     return 1
   fi
   echo "vitta-groups: copying $group from /usr/lib/group to /etc/group"
   printf '%s\n' "$entry" >>/etc/group
 }
 
-# Members are field 4 of the /etc/group wheel line, comma-separated.
-IFS=',' read -r -a WHEEL_USERS <<<"$(awk -F: '$1 == "wheel" { print $4 }' /etc/group)"
+if [[ ! -f "$STATE_FILE" || "$(<"$STATE_FILE")" != "$GROUPS_VERSION" ]]; then
+  groups_ready=1
+  for group in "${TARGET_GROUPS[@]}"; do
+    if ! ensure_etc_group "$group"; then
+      groups_ready=0
+    fi
+  done
+  if [[ "$groups_ready" -eq 1 ]]; then
+    mkdir -p "$(dirname "$STATE_FILE")"
+    printf '%s\n' "$GROUPS_VERSION" >"$STATE_FILE"
+    echo "vitta-groups: group entries version $GROUPS_VERSION applied"
+  else
+    echo "vitta-groups: group entries incomplete; will retry next boot" >&2
+  fi
+fi
 
-failed=0
+wheel_entry=$(group_entry wheel)
+if [[ -z "$wheel_entry" ]]; then
+  echo "vitta-groups: wheel group is not available; no memberships to reconcile" >&2
+  exit 0
+fi
+
+IFS=: read -r _ _ wheel_gid wheel_members <<<"$wheel_entry"
+declare -A WHEEL_USERS=()
+IFS=',' read -r -a supplementary_users <<<"$wheel_members"
+for user in "${supplementary_users[@]}"; do
+  [[ -n "$user" ]] && WHEEL_USERS["$user"]=1
+done
+while IFS=: read -r user _ _ primary_gid _; do
+  [[ "$primary_gid" == "$wheel_gid" ]] && WHEEL_USERS["$user"]=1
+done < <(getent passwd)
+
 for group in "${TARGET_GROUPS[@]}"; do
-  if ! ensure_etc_group "$group"; then
-    failed=1
+  entry=$(group_entry "$group")
+  if [[ -z "$entry" ]]; then
+    echo "vitta-groups: group $group is not available; skipping it" >&2
     continue
   fi
-  for user in "${WHEEL_USERS[@]}"; do
-    [[ -n "$user" ]] || continue
-    echo "vitta-groups: adding $user to $group"
-    usermod -aG "$group" "$user"
+  IFS=: read -r _ _ group_gid _ <<<"$entry"
+  for user in "${!WHEEL_USERS[@]}"; do
+    if ! user_gids=$(id -G "$user" 2>/dev/null); then
+      echo "vitta-groups: user $user is not available; skipping it" >&2
+      continue
+    fi
+    if tr " " "\n" <<<"$user_gids" | grep -Fxq "$group_gid"; then
+      echo "vitta-groups: $user is already in $group"
+    else
+      echo "vitta-groups: adding $user to $group"
+      usermod -aG "$group" "$user"
+    fi
   done
 done
 
-if [[ "$failed" -ne 0 ]]; then
-  echo "vitta-groups: incomplete, not recording version (retries next boot)" >&2
-  exit 1
-fi
-
-mkdir -p "$(dirname "$STATE_FILE")"
-printf '%s\n' "$GROUPS_VERSION" >"$STATE_FILE"
-echo "vitta-groups: version $GROUPS_VERSION applied for: ${WHEEL_USERS[*]:-(no wheel members)}"
+echo "vitta-groups: reconciled docker/libvirt membership for ${#WHEEL_USERS[@]} wheel users"
