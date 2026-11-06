@@ -563,6 +563,56 @@ jobs:
                     echo "  FAIL  v4l2loopback not resolvable or unsigned for kernel $VITTA_KVER"
                     FAIL=1
                 fi
+                echo "Vitta greeter (greetd -> cage -> Quickshell):"
+                for p in greetd cage quickshell; do check_rpm "$p"; done
+                # Footer source (vitta <IMAGE_VERSION>); informational.
+                grep -E "^(IMAGE_VERSION|VERSION_ID)=" /etc/os-release | sed "s/^/  info  /" || true
+                for VITTA_GREETD_LINE in "vt = 1" "command = \"/usr/libexec/vitta/vitta-greeter\"" "user = \"greetd\""; do
+                    if grep -qxF "$VITTA_GREETD_LINE" /etc/greetd/config.toml 2>/dev/null; then
+                        echo "  ok    greetd config: $VITTA_GREETD_LINE"
+                    else
+                        echo "  FAIL  /etc/greetd/config.toml lacks: $VITTA_GREETD_LINE"; FAIL=1
+                    fi
+                done
+                VITTA_GREETD_STATE=$(systemctl is-enabled greetd.service 2>/dev/null || true)
+                if [ "$VITTA_GREETD_STATE" = enabled ]; then echo "  ok    greetd.service enabled"; else echo "  FAIL  greetd.service is ${VITTA_GREETD_STATE:-missing}, expected enabled"; FAIL=1; fi
+                VITTA_DM=$(readlink -f /etc/systemd/system/display-manager.service 2>/dev/null || true)
+                case "$VITTA_DM" in
+                    */greetd.service) echo "  ok    display-manager.service -> $VITTA_DM" ;;
+                    *) echo "  FAIL  display-manager.service resolves to ${VITTA_DM:-nothing}, expected greetd.service"; FAIL=1 ;;
+                esac
+                # graphical.target is what pulls display-manager.service in at boot.
+                VITTA_TARGET=$(systemctl get-default 2>/dev/null || true)
+                if [ "$VITTA_TARGET" = graphical.target ]; then echo "  ok    default target graphical.target"; else echo "  FAIL  default target ${VITTA_TARGET:-unset}, expected graphical.target"; FAIL=1; fi
+                VITTA_SESSIONS=$(ls -A /usr/share/wayland-sessions/ 2>/dev/null | tr "\n" " ")
+                if [ "$VITTA_SESSIONS" = "niri.desktop " ]; then echo "  ok    wayland-sessions: niri.desktop only"; else echo "  FAIL  wayland-sessions: ${VITTA_SESSIONS:-empty}, expected niri.desktop only"; FAIL=1; fi
+                # Fedora ships the keyring lines as -auth/-session (skip if module absent); accept either.
+                for VITTA_PAM in "auth[[:space:]]+optional[[:space:]]+pam_gnome_keyring\.so" \
+                                 "session[[:space:]]+optional[[:space:]]+pam_gnome_keyring\.so[[:space:]]+auto_start" \
+                                 "password[[:space:]]+optional[[:space:]]+pam_gnome_keyring\.so[[:space:]]+use_authtok"; do
+                    if grep -Eq "^-?${VITTA_PAM}[[:space:]]*$" /etc/pam.d/greetd 2>/dev/null; then
+                        echo "  ok    pam.d/greetd: ${VITTA_PAM%%\[*} pam_gnome_keyring"
+                    else
+                        echo "  FAIL  /etc/pam.d/greetd lacks: $VITTA_PAM"; FAIL=1
+                    fi
+                done
+                if rpm -V greetd 2>/dev/null | grep -q "/etc/pam.d/greetd-greeter"; then echo "  FAIL  /etc/pam.d/greetd-greeter differs from the greetd package"; FAIL=1; else echo "  ok    /etc/pam.d/greetd-greeter as packaged"; fi
+                VITTA_DAY=$(vitta-theme mode --at 2026-06-21T12:00+02:00 2>/dev/null || true)
+                VITTA_NIGHT=$(vitta-theme mode --at 2026-06-21T00:30+02:00 2>/dev/null || true)
+                if [ "$VITTA_DAY/$VITTA_NIGHT" = light/dark ]; then echo "  ok    vitta-theme mode: noon light, 00:30 dark"; else echo "  FAIL  vitta-theme mode noon/00:30 = ${VITTA_DAY:-?}/${VITTA_NIGHT:-?}, expected light/dark"; FAIL=1; fi
+                if [ -s /usr/share/vitta/theme/logo-dark.png ] && [ -s /usr/share/vitta/theme/logo-light.png ]; then echo "  ok    greeter logos"; else echo "  FAIL  /usr/share/vitta/theme/logo-{dark,light}.png missing or empty"; FAIL=1; fi
+                if [ -x /usr/libexec/vitta/vitta-greeter ]; then echo "  ok    /usr/libexec/vitta/vitta-greeter executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greeter missing or not executable"; FAIL=1; fi
+                if VITTA_QS_VERSION=$(quickshell --version 2>&1); then echo "  ok    $VITTA_QS_VERSION"; else echo "  FAIL  quickshell --version: $VITTA_QS_VERSION"; FAIL=1; fi
+                # Behavioural: load the production greeter QML headless. Catches QML type and
+                # reference errors that would otherwise surface only as a black screen at boot.
+                mkdir -p -m 700 /tmp/vitta-qs-runtime
+                VITTA_QS_LOG=$(XDG_RUNTIME_DIR=/tmp/vitta-qs-runtime QT_QPA_PLATFORM=offscreen timeout 10 quickshell -p /usr/share/vitta/greeter/shell.qml 2>&1 || true)
+                VITTA_QS_BAD=$(printf "%s\n" "$VITTA_QS_LOG" | grep -E "ERROR|Error:|TypeError|ReferenceError|is not a type|Cannot assign|Unable to assign|not installed|failed to load" || true)
+                if printf "%s\n" "$VITTA_QS_LOG" | grep -q "Configuration Loaded" && [ -z "$VITTA_QS_BAD" ]; then
+                    echo "  ok    greeter QML loads headless"
+                else
+                    echo "  FAIL  greeter QML did not load cleanly:"; printf "%s\n" "$VITTA_QS_LOG" | tail -n 20 | sed "s/^/          /"; FAIL=1
+                fi
             fi
             echo "Phase 0 bootstrap binaries:"
             for bin in pass gpg pinentry-curses age ssh git jq curl; do check_bin "$bin"; done
