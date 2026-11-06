@@ -3,32 +3,37 @@
 # fake greetd backend, for checking looks and the login state machine without
 # logging out. Nothing is authenticated, launched or powered off.
 #
-# Usage: vitta-greeter-preview [--mode light|dark] [--scenario ok|badpass|multiprompt|error]
+# Usage: vitta-greeter-preview [--mode light|dark] [--scenario ok|badpass|multiprompt|error] [--selftest]
 #   --mode      pin the palette (default: whatever `vitta-theme mode` says)
 #   --scenario  fake greetd behaviour (default: ok)
+#   --selftest  no window: run selftest.qml offscreen for the scenario (default:
+#               all four), print its checks, exit non-zero if any check fails
 # VITTA_ROOT=<dir> runs the QML from <dir>/usr/share/vitta/greeter instead of
 # the installed copy, e.g. VITTA_ROOT=$PWD/files/vitta from the repo.
 set -euo pipefail
 
 usage() {
-    sed -n "6,10p" "$0" | sed "s/^# \{0,1\}//"
+    sed -n "6,12p" "$0" | sed "s/^# \{0,1\}//"
     exit "${1:-0}"
 }
 
 MODE=""
-SCENARIO=ok
+SCENARIO=""
+SELFTEST=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --mode) MODE="${2:-}"; shift 2 ;;
         --scenario) SCENARIO="${2:-}"; shift 2 ;;
+        --selftest) SELFTEST=1; shift ;;
         -h|--help) usage 0 ;;
         *) echo "vitta-greeter-preview: unknown argument: $1" >&2; usage 2 ;;
     esac
 done
 case "$MODE" in ""|light|dark) ;; *) echo "vitta-greeter-preview: --mode must be light or dark" >&2; exit 2 ;; esac
-case "$SCENARIO" in ok|badpass|multiprompt|error) ;; *) echo "vitta-greeter-preview: unknown scenario: $SCENARIO" >&2; exit 2 ;; esac
+case "$SCENARIO" in ""|ok|badpass|multiprompt|error) ;; *) echo "vitta-greeter-preview: unknown scenario: $SCENARIO" >&2; exit 2 ;; esac
 
-SHELL_QML="${VITTA_ROOT:-}/usr/share/vitta/greeter/shell.qml"
+GREETER_DIR="${VITTA_ROOT:-}/usr/share/vitta/greeter"
+SHELL_QML="$GREETER_DIR/$([ "$SELFTEST" = 1 ] && echo selftest.qml || echo shell.qml)"
 if [ ! -f "$SHELL_QML" ]; then
     echo "vitta-greeter-preview: $SHELL_QML not found" >&2
     exit 1
@@ -41,9 +46,38 @@ trap 'rm -rf "$STATE_DIR"' EXIT
 printf "%s\n" "${USER:-$(id -un)}" > "$STATE_DIR/vitta-last-user"
 
 # Never let the preview reach a real greetd socket.
-env -u GREETD_SOCK \
-    VITTA_GREETER_PREVIEW=1 \
-    VITTA_GREETER_SCENARIO="$SCENARIO" \
-    VITTA_GREETER_MODE="$MODE" \
-    VITTA_GREETER_STATE_DIR="$STATE_DIR" \
-    quickshell -p "$SHELL_QML"
+run_greeter() {
+    env -u GREETD_SOCK \
+        VITTA_GREETER_PREVIEW=1 \
+        VITTA_GREETER_SCENARIO="$1" \
+        VITTA_GREETER_MODE="$MODE" \
+        VITTA_GREETER_STATE_DIR="$STATE_DIR" \
+        "${@:2}"
+}
+
+if [ "$SELFTEST" != 1 ]; then
+    run_greeter "${SCENARIO:-ok}" quickshell -p "$SHELL_QML"
+    exit
+fi
+
+# Selftest: headless, one quickshell run per scenario. A scenario passes only
+# if it reports PASS and Quickshell logged no QML errors.
+if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -w "${XDG_RUNTIME_DIR:-/nonexistent}" ]; then
+    export XDG_RUNTIME_DIR="$STATE_DIR/runtime"
+    mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+fi
+MODE="${MODE:-dark}"
+RC=0
+for S in ${SCENARIO:-ok badpass multiprompt error}; do
+    LOG=$(run_greeter "$S" QT_QPA_PLATFORM=offscreen timeout 30 quickshell -p "$SHELL_QML" 2>&1 || true)
+    printf "%s\n" "$LOG" | grep -o "SELFTEST .*" || true
+    BAD=$(printf "%s\n" "$LOG" | grep -E "ERROR|Error:|TypeError|ReferenceError|is not a type|Cannot assign|Unable to assign|not installed|failed to load" || true)
+    if printf "%s\n" "$LOG" | grep -q "SELFTEST RESULT PASS $S " && [ -z "$BAD" ]; then
+        echo "vitta-greeter-preview: selftest $S passed"
+    else
+        echo "vitta-greeter-preview: selftest $S FAILED" >&2
+        [ -n "$BAD" ] && printf "%s\n" "$BAD" | sed "s/^/    /" >&2
+        RC=1
+    fi
+done
+exit "$RC"

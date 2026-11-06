@@ -26,6 +26,10 @@ Item {
     property bool answeringEcho: false
     property string parkedUser: ""
     property date now: new Date()
+    // For selftest.qml: the scripted test drives and inspects these.
+    readonly property alias loginField: userField
+    readonly property alias passwordField: passField
+    readonly property alias statusLabel: statusLine
 
     implicitHeight: content.implicitHeight + 2 * (inset + pad)
     height: implicitHeight
@@ -210,6 +214,7 @@ Item {
         }
 
         Text {
+            id: statusLine
             width: parent.width
             // Reserve one line so the card does not jump when a message appears.
             height: Math.max(implicitHeight, Math.round(card.baseSize * 1.4))
