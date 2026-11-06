@@ -1,0 +1,14 @@
+# Add every wheel member to the docker and libvirt groups (Vitta replacement
+# for Bluefin's bluefin-dx-groups.service). Idempotent: the helper records a
+# version in /etc/vitta/groups-version and exits early once applied.
+[Unit]
+Description=Add wheel members to the docker and libvirt groups
+After=local-fs.target systemd-sysusers.service
+ConditionPathExists=/usr/libexec/vitta/vitta-groups
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/vitta/vitta-groups
+
+[Install]
+WantedBy=multi-user.target

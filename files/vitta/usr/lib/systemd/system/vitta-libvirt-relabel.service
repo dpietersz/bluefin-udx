@@ -1,0 +1,18 @@
+# Restore SELinux labels on libvirt state (Vitta replacement for Bluefin's
+# libvirt-workaround.service). /var survives image switches untouched, so
+# files created under a different policy or image keep stale contexts and
+# virtqemud then fails to open disks/logs. Failures are ignored ("-"): a
+# missing /var/log/libvirt must not block boot.
+[Unit]
+Description=Relabel libvirt state directories for SELinux
+ConditionPathIsDirectory=/var/lib/libvirt
+After=local-fs.target
+Before=libvirtd.service virtqemud.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=-/usr/sbin/restorecon -R /var/lib/libvirt /var/log/libvirt
+
+[Install]
+WantedBy=multi-user.target

@@ -5,7 +5,7 @@
 # job (scripts/check-fedora-next.sh with RECIPES/BASE_IMAGE pointed here).
 #
 # Shares recipes/common.yml with bluefin-udx[-nvidia]. Vitta-only modules
-# (files/vitta overlay, desktop plumbing Bluefin used to supply) arrive in
+# (files/vitta overlay, desktop plumbing Bluefin used to supply) live in
 # recipes/vitta-modules.yml. Published only as :testing — never :stable.
 
 name: vitta
@@ -19,6 +19,9 @@ modules:
       - source: system
         destination: /
   - from-file: common.yml
+  # Vitta-only: files/vitta overlay + what bluefin-dx used to supply (keyring,
+  # portals, brew, docker, libvirt, tailscale, VS Code, v4l2loopback).
+  - from-file: vitta-modules.yml
 
   # Identity. The module follows the /etc/os-release symlink, so this rewrites
   # /usr/lib/os-release too (what ostree/bootc read for boot entries). Values

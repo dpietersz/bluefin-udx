@@ -1,0 +1,122 @@
+# vitta-modules.yml — Vitta-only modules, included from recipes/vitta.yml after
+# common.yml. Re-homes what bluefin-dx used to supply on top of base-main:
+# keyring, portal + file/device stack, Noto fonts, power profiles, Homebrew,
+# Docker, x86 KVM/libvirt, Tailscale, VS Code and the signed v4l2loopback kmod.
+# Package set = docs/research/2026-11-06-vitta-gap-analysis.md "Final RPM ADD
+# line", with the Noto names as the *-vf-fonts packages bluefin-dx shipped.
+#
+# Never include this from a bluefin-udx recipe: files/vitta is Vitta-only.
+#
+# ORDER IS LOAD-BEARING:
+#   1. repo-only files module   — the VS Code .repo + key must exist before
+#                                 rpm-ostree resolves `code`.
+#   2. rpm-ostree / akmods / brew — package payload.
+#   3. full files/vitta overlay — AFTER every package module, so overlay files
+#                                 (later: greetd config, PAM) deterministically
+#                                 replace package defaults; also restores the
+#                                 shared baked keys akmods' rpmfusion
+#                                 install/uninstall deletes.
+#   4. systemd                  — enables units shipped by packages AND by the
+#                                 overlay, so it must follow both.
+
+modules:
+  # Only the repo definitions + their baked keys from the Vitta overlay. Same
+  # source paths as the full overlay below (which re-copies them), so there is
+  # one copy of each file in git. Pointing rpm-ostree `repos:`/`keys:` at
+  # remote URLs instead would put Microsoft's key host in the build path.
+  - type: files
+    files:
+      - source: vitta/etc/yum.repos.d
+        destination: /etc/yum.repos.d
+      - source: vitta/etc/pki/rpm-gpg
+        destination: /etc/pki/rpm-gpg
+
+  - type: rpm-ostree
+    repos:
+      - https://download.docker.com/linux/fedora/docker-ce.repo
+      - https://pkgs.tailscale.com/stable/fedora/tailscale.repo
+    install:
+      # Desktop plumbing Bluefin's GNOME layer used to provide.
+      - gnome-keyring
+      - gnome-keyring-pam           # unlocks the keyring at login (greetd PAM, later task)
+      - xdg-desktop-portal-gnome    # file chooser / screencast portal under niri
+      - xdg-user-dirs
+      - nautilus                    # file manager only — no GNOME session
+      - gvfs
+      - gvfs-gphoto2
+      - gvfs-mtp
+      - tuned
+      - tuned-ppd                   # power-profiles D-Bus API used by the shell
+      # Already in base-main:44; listed so the font contract (fontconfig canary
+      # "Noto Serif", emoji) does not silently depend on base-main's choice.
+      - google-noto-sans-vf-fonts
+      - google-noto-serif-vf-fonts
+      - google-noto-color-emoji-fonts
+      # Developer tooling.
+      - android-tools
+      - gcc                         # also what the brew module requires
+      - make
+      - code                        # VS Code, files/vitta/etc/yum.repos.d/vscode.repo
+      # Docker (vendor repo, as bluefin-dx) + podman-compose.
+      - docker-ce
+      - docker-ce-cli
+      - docker-ce-rootless-extras
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+      - podman-compose
+      # x86 KVM for the Windows Work VM. qemu-kvm (not `qemu`) keeps the
+      # emulator set to qemu-system-x86; libvirt-daemon-kvm avoids Bluefin's
+      # LXC/Xen/storage-backend daemons.
+      - qemu-kvm
+      - libvirt-daemon-kvm
+      - libvirt-client
+      - virt-install
+      - virt-manager
+      - virt-viewer
+      - virtiofsd
+      - swtpm
+      - edk2-ovmf
+      - tailscale
+    # install + remove in one module = one `rpm-ostree override remove ...
+    # --install=...` transaction, which is what lets tuned-ppd replace ppd:
+    remove:
+      # common.yml's desktop set pulls power-profiles-daemon in as the
+      # ppd-service provider; tuned-ppd provides the same D-Bus API and
+      # conflicts with it (first Vitta build, 2026-11-06).
+      - power-profiles-daemon
+      # base-main:44 ships an aarch64 user-mode emulator; Vitta is x86 KVM only.
+      - qemu-user-static-aarch64
+
+  # ublue-signed kmod from ghcr.io/ublue-os/akmods:main-<fedora>, the same
+  # build bluefin-dx bakes. Its modprobe/modules-load config (video_nr=10)
+  # already comes from the shared files/system overlay.
+  - type: akmods
+    install:
+      - v4l2loopback
+
+  # Bakes Homebrew under /usr/share/homebrew; brew-setup.service copies it to
+  # /var/home/linuxbrew on first boot, brew-update/upgrade timers keep it fresh.
+  - type: brew
+    brew-analytics: false
+
+  - type: files
+    files:
+      - source: vitta
+        destination: /
+      # Restore the shared baked keys. The akmods module installs and then
+      # uninstalls rpmfusion-free-release around the kmod install; that
+      # package owns /etc/pki/rpm-gpg/RPM-GPG-KEY-rpmfusion-free-fedora-2020,
+      # so its removal deletes the files/system copy rpmfusion-free-telegram.repo
+      # verifies against (first green-build smoke, 2026-11-06). Read-only use
+      # of files/system; nothing Vitta-only is added there.
+      - source: system/etc/pki/rpm-gpg
+        destination: /etc/pki/rpm-gpg
+
+  - type: systemd
+    system:
+      enabled:
+        - vitta-groups.service
+        - vitta-libvirt-relabel.service
+        - tailscaled.service
+        - docker.socket

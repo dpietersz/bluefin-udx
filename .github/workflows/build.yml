@@ -60,7 +60,7 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           ENGINE: sudo podman
-          RECIPES: recipes/common.yml recipes/vitta.yml
+          RECIPES: recipes/common.yml recipes/vitta.yml recipes/vitta-modules.yml
           BASE_IMAGE: ghcr.io/ublue-os/base-main
         run: scripts/check-fedora-next.sh
 
@@ -380,7 +380,7 @@ jobs:
             sleep "$((attempt * 60))"
           done
           echo "Images in podman store after build:"
-          sudo podman images --format "{{.Repository}}:{{.Tag}}" | head -20
+          sudo podman images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | head -20
 
       # ----------------------------------------------------------------------
       # SMOKE-BOOT GATE.
@@ -495,6 +495,12 @@ jobs:
                 else
                     echo "  ok    no qemu-user-static* / non-x86 qemu-system-*"
                 fi
+                if rpm -q power-profiles-daemon >/dev/null 2>&1; then
+                    echo "  FAIL  power-profiles-daemon installed - tuned-ppd must own ppd-service"
+                    FAIL=1
+                else
+                    echo "  ok    power-profiles-daemon replaced by tuned-ppd"
+                fi
                 check_file /etc/yum.repos.d/vscode.repo
                 VSCODE_KEY_SHA256=$(sha256sum /etc/pki/rpm-gpg/microsoft.asc 2>/dev/null | cut -d " " -f 1)
                 if [ "$VSCODE_KEY_SHA256" = "2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6" ]; then
@@ -505,7 +511,7 @@ jobs:
                 fi
                 # Offline query of unit symlinks/presets; needs no running systemd.
                 for VITTA_UNIT in vitta-groups.service vitta-libvirt-relabel.service tailscaled.service docker.socket \
-                                  brew-setup.service brew-update.timer brew-upgrade.timer; do
+                                  brew-setup.service brew-update.timer brew-upgrade.timer tuned.service tuned-ppd.service; do
                     VITTA_UNIT_STATE=$(systemctl is-enabled "$VITTA_UNIT" 2>/dev/null || true)
                     if [ "$VITTA_UNIT_STATE" = enabled ]; then
                         echo "  ok    $VITTA_UNIT enabled"
