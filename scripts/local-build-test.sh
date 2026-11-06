@@ -62,8 +62,13 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
         if [ -e "$1" ]; then echo "  ok    $1"; else echo "  MISS  $1"; FAIL=1; fi
     }
     check_rpm() {
-        RPM_NEVRA=$(rpm -q --qf "%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}" "$1" 2>/dev/null || true)
-        if [ -n "$RPM_NEVRA" ]; then echo "  ok    rpm $RPM_NEVRA"; else echo "  MISS  rpm $1"; FAIL=1; fi
+        # Judge by exit status: for a missing package rpm -q prints
+        # "package X is not installed" on STDOUT, so a non-empty test passed it.
+        if RPM_NEVRA=$(rpm -q --qf "%{NAME}-%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}" "$1" 2>/dev/null); then
+            echo "  ok    rpm $RPM_NEVRA"
+        else
+            echo "  MISS  rpm $1"; FAIL=1
+        fi
     }
     check_rpm_vendor() {
         RPM_VENDOR=$(rpm -q --qf "%{VENDOR}" "$1" 2>/dev/null || true)
