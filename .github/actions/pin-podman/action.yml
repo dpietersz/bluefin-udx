@@ -1,0 +1,80 @@
+name: Pin Podman to the distro build on kernel overlay
+description: >-
+  Replace the runner's static Podman bundle with distro Podman on kernel
+  overlay storage, and assert no fuse-overlayfs mount program can be adopted.
+  Rationale and incident history live in .github/workflows/build.yml above
+  the step that uses this action. Shared by the build and fedora-next jobs.
+runs:
+  using: composite
+  steps:
+    - name: Pin Podman
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # Remove the static bundle and every config file it planted.
+        sudo rm -f /usr/local/bin/{podman,pasta,pasta.avx2,crun,fusermount3,runc}
+        sudo rm -rf /usr/local/lib/podman /usr/local/libexec/podman
+        sudo rm -f /etc/containers/{storage.conf,containers.conf,seccomp.json}
+        sudo rm -f /etc/containers/containers.conf.d/00-fix-runtime.conf
+
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends podman
+        hash -r
+
+        # Close both routes back to FUSE. Done AFTER apt so a fuse-overlayfs
+        # pulled in as a dependency is caught too; leaving the package
+        # installed is fine, LookPath only cares about the binary.
+        sudo rm -f /usr/local/bin/fuse-overlayfs /usr/bin/fuse-overlayfs
+        sudo rm -rf /var/lib/containers/storage /run/containers/storage
+
+        # Pin storage explicitly instead of inheriting the distro default
+        # from /usr/share/containers/storage.conf.
+        sudo mkdir -p /etc/containers
+        sudo tee /etc/containers/storage.conf >/dev/null <<'EOF'
+        [storage]
+        driver = "overlay"
+        runroot = "/run/containers/storage"
+        graphroot = "/var/lib/containers/storage"
+
+        [storage.options.overlay]
+        mountopt = "nodev"
+        EOF
+
+        if [ "$(command -v podman)" != "/usr/bin/podman" ]; then
+          echo "::error::Expected distro Podman at /usr/bin/podman, got $(command -v podman)"
+          exit 1
+        fi
+        podman --version
+
+        if command -v fuse-overlayfs >/dev/null 2>&1; then
+          echo "::error::fuse-overlayfs still resolvable at $(command -v fuse-overlayfs) - overlay.Init would re-adopt it"
+          exit 1
+        fi
+
+        PODMAN_INFO=$(sudo podman info \
+          --format 'runtime={{.Host.OCIRuntime.Path}} conmon={{.Host.Conmon.Path}} storage={{.Store.GraphDriverName}}')
+        echo "$PODMAN_INFO"
+        if [[ "$PODMAN_INFO" != *"runtime=/usr/bin/crun"* ||
+              "$PODMAN_INFO" != *"conmon=/usr/bin/conmon"* ]]; then
+          echo "::error::Distro Podman is still using a static-bundle component"
+          exit 1
+        fi
+        if [[ "$PODMAN_INFO" != *"storage=overlay"* ]]; then
+          echo "::error::Expected the overlay storage driver - got: $PODMAN_INFO"
+          exit 1
+        fi
+
+        # The decisive assertion, and the reason it is a file read rather than
+        # a podman info field: no info field can see this. GraphOptions stays
+        # EMPTY when the mount program is auto-detected rather than configured,
+        # and "Native Overlay Diff" reads false on these runners even on a
+        # healthy kernel-overlay build -- probe run 32368262988 measured false
+        # on both the 663s path and the 66s path, so asserting it would fail a
+        # correct build. The flag file is the only direct signal.
+        FLAG=/var/lib/containers/storage/overlay/.has-mount-program
+        if [ -e "$FLAG" ] && [ "$(sudo cat "$FLAG")" = "true" ]; then
+          echo "::error::containers/storage adopted a mount program - build would run through fuse-overlayfs"
+          exit 1
+        fi
+        echo "storage: kernel overlay, no mount program"

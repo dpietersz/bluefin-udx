@@ -212,11 +212,23 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     # a silent regression too. This block runs inside a single-quoted run -c
     # wrapper, so use only DOUBLE quotes here. A single quote or backtick in
     # this region breaks out of the wrapper.
-    check_bin zeditor
-    if rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zfs-"; then
-        echo "  ok    /usr/bin/zed owned by zfs (editor is zeditor)"
+    # Upstream installs zfs ONLY on bluefin-dx :stable (ublue-os/bluefin
+    # build_files/base/03-install-kernel-akmods.sh, "ZFS for stable"); the
+    # :latest canary has none. Terra zed then installs plain zed-cli and there
+    # is no zeditor. Dotfiles launch "zeditor", so losing zfs upstream (e.g. a
+    # base without ublue akmods) changes the editor command - see MAINTENANCE.md.
+    if rpm -q zfs >/dev/null 2>&1; then
+        check_bin zeditor
+        if rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zfs-"; then
+            echo "  ok    /usr/bin/zed owned by zfs (editor is zeditor)"
+        else
+            echo "  FAIL: /usr/bin/zed not owned by zfs - monolithic zed reintroduced the collision"
+            exit 1
+        fi
+    elif rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zed-cli-"; then
+        echo "  WARN  base ships no zfs: editor is zed (zed-cli), zeditor absent - dotfiles expect zeditor"
     else
-        echo "  FAIL: /usr/bin/zed not owned by zfs - monolithic zed reintroduced the collision"
+        echo "  FAIL: no zfs and /usr/bin/zed not owned by Terra zed-cli"
         exit 1
     fi
     check_rpm postgresql

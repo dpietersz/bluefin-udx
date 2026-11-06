@@ -43,12 +43,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # Not docker: silverblue-main has more layers than dockerd can register
+      # ("max depth exceeded", first run 2026-11-06). Same podman pin as the
+      # build job, so this never reads an image through fuse-overlayfs either.
+      - name: Pin Podman to the distro build on kernel overlay
+        uses: ./.github/actions/pin-podman
+
       - name: Resolve recipe packages on the next Fedora major
         env:
-          # Docker, not podman: this job commits no layers, and the runner's
-          # podman ships with the fuse-overlayfs config the build job has to
-          # tear down (see "Pin Podman" below). Not worth repeating here.
-          ENGINE: docker
+          ENGINE: sudo podman
         run: scripts/check-fedora-next.sh
 
   build:
@@ -163,75 +166,7 @@ jobs:
       # 00-fix-runtime.conf pins crun to a /usr/local/bin path we just deleted.
       # ----------------------------------------------------------------------
       - name: Pin Podman to the distro build on kernel overlay
-        run: |
-          set -euo pipefail
-
-          # Remove the static bundle and every config file it planted.
-          sudo rm -f /usr/local/bin/{podman,pasta,pasta.avx2,crun,fusermount3,runc}
-          sudo rm -rf /usr/local/lib/podman /usr/local/libexec/podman
-          sudo rm -f /etc/containers/{storage.conf,containers.conf,seccomp.json}
-          sudo rm -f /etc/containers/containers.conf.d/00-fix-runtime.conf
-
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends podman
-          hash -r
-
-          # Close both routes back to FUSE. Done AFTER apt so a fuse-overlayfs
-          # pulled in as a dependency is caught too; leaving the package
-          # installed is fine, LookPath only cares about the binary.
-          sudo rm -f /usr/local/bin/fuse-overlayfs /usr/bin/fuse-overlayfs
-          sudo rm -rf /var/lib/containers/storage /run/containers/storage
-
-          # Pin storage explicitly instead of inheriting the distro default
-          # from /usr/share/containers/storage.conf.
-          sudo mkdir -p /etc/containers
-          sudo tee /etc/containers/storage.conf >/dev/null <<'EOF'
-          [storage]
-          driver = "overlay"
-          runroot = "/run/containers/storage"
-          graphroot = "/var/lib/containers/storage"
-
-          [storage.options.overlay]
-          mountopt = "nodev"
-          EOF
-
-          if [ "$(command -v podman)" != "/usr/bin/podman" ]; then
-            echo "::error::Expected distro Podman at /usr/bin/podman, got $(command -v podman)"
-            exit 1
-          fi
-          podman --version
-
-          if command -v fuse-overlayfs >/dev/null 2>&1; then
-            echo "::error::fuse-overlayfs still resolvable at $(command -v fuse-overlayfs) - overlay.Init would re-adopt it"
-            exit 1
-          fi
-
-          PODMAN_INFO=$(sudo podman info \
-            --format 'runtime={{.Host.OCIRuntime.Path}} conmon={{.Host.Conmon.Path}} storage={{.Store.GraphDriverName}}')
-          echo "$PODMAN_INFO"
-          if [[ "$PODMAN_INFO" != *"runtime=/usr/bin/crun"* ||
-                "$PODMAN_INFO" != *"conmon=/usr/bin/conmon"* ]]; then
-            echo "::error::Distro Podman is still using a static-bundle component"
-            exit 1
-          fi
-          if [[ "$PODMAN_INFO" != *"storage=overlay"* ]]; then
-            echo "::error::Expected the overlay storage driver - got: $PODMAN_INFO"
-            exit 1
-          fi
-
-          # The decisive assertion, and the reason it is a file read rather than
-          # a podman info field: no info field can see this. GraphOptions stays
-          # EMPTY when the mount program is auto-detected rather than configured,
-          # and "Native Overlay Diff" reads false on these runners even on a
-          # healthy kernel-overlay build -- probe run 32368262988 measured false
-          # on both the 663s path and the 66s path, so asserting it would fail a
-          # correct build. The flag file is the only direct signal.
-          FLAG=/var/lib/containers/storage/overlay/.has-mount-program
-          if [ -e "$FLAG" ] && [ "$(sudo cat "$FLAG")" = "true" ]; then
-            echo "::error::containers/storage adopted a mount program - build would run through fuse-overlayfs"
-            exit 1
-          fi
-          echo "storage: kernel overlay, no mount program"
+        uses: ./.github/actions/pin-podman
 
       # ----------------------------------------------------------------------
       # Install bluebuild CLI directly so we can drive build/push as separate
@@ -616,11 +551,23 @@ jobs:
             # wrapper, so use only DOUBLE quotes here. A single quote or a
             # backtick in this region breaks out of the wrapper (learned the
             # hard way 2026-06-14: it ate the editor check and failed the gate).
-            check_bin zeditor
-            if rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zfs-"; then
-                echo "  ok    /usr/bin/zed owned by zfs (editor is zeditor)"
+            # Upstream installs zfs ONLY on bluefin-dx :stable (ublue-os/bluefin
+            # build_files/base/03-install-kernel-akmods.sh, "ZFS for stable"); the
+            # :latest canary has none. Terra zed then installs plain zed-cli and there
+            # is no zeditor. Dotfiles launch "zeditor", so losing zfs upstream (e.g. a
+            # base without ublue akmods) changes the editor command - see MAINTENANCE.md.
+            if rpm -q zfs >/dev/null 2>&1; then
+                check_bin zeditor
+                if rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zfs-"; then
+                    echo "  ok    /usr/bin/zed owned by zfs (editor is zeditor)"
+                else
+                    echo "  FAIL: /usr/bin/zed not owned by zfs - monolithic zed reintroduced the collision"
+                    exit 1
+                fi
+            elif rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zed-cli-"; then
+                echo "  WARN  base ships no zfs: editor is zed (zed-cli), zeditor absent - dotfiles expect zeditor"
             else
-                echo "  FAIL: /usr/bin/zed not owned by zfs - monolithic zed reintroduced the collision"
+                echo "  FAIL: no zfs and /usr/bin/zed not owned by Terra zed-cli"
                 exit 1
             fi
             check_rpm postgresql

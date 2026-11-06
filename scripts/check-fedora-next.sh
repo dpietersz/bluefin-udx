@@ -27,9 +27,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BASE_IMAGE="${BASE_IMAGE:-ghcr.io/ublue-os/silverblue-main}"
-ENGINE="${ENGINE:-podman}"
+# ENGINE may carry a prefix, e.g. ENGINE="sudo podman" in CI.
+read -r -a ENGINE_CMD <<< "${ENGINE:-podman}"
 
-for tool in "$ENGINE" yq skopeo jq; do
+for tool in "${ENGINE_CMD[@]: -1}" yq skopeo jq; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "ERROR: $tool not found" >&2
     exit 2
@@ -79,7 +80,7 @@ if ! skopeo inspect --no-tags "docker://${IMAGE}" >/dev/null 2>&1; then
 fi
 
 # podman understands --pull=newer; docker only always|missing|never.
-if [ "$(basename "$ENGINE")" = docker ]; then PULL=always; else PULL=newer; fi
+if [ "$(basename "${ENGINE_CMD[-1]}")" = docker ]; then PULL=always; else PULL=newer; fi
 
 # Inside the container: install the baked repos/keys exactly where the image's
 # files module puts them, fetch the remote repos/keys the rpm-ostree module
@@ -87,7 +88,7 @@ if [ "$(basename "$ENGINE")" = docker ]; then PULL=always; else PULL=newer; fi
 # dnf5 exits non-zero on --assumeno even when solving succeeded, so success is
 # judged on the solver output, not the exit code.
 set +e
-OUTPUT=$("$ENGINE" run --rm --pull="$PULL" \
+OUTPUT=$("${ENGINE_CMD[@]}" run --rm --pull="$PULL" \
   -v "$PWD/files/system/etc/yum.repos.d:/in/repos:ro,z" \
   -v "$PWD/files/system/etc/pki/rpm-gpg:/in/keys:ro,z" \
   -e REPO_URLS="${REPO_URLS[*]}" \
