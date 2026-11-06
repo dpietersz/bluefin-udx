@@ -535,6 +535,19 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     else
         echo "  ok    fc-match serif is not a Nerd Font"
     fi
+    if [ "$RECIPE_NAME" = "vitta" ]; then
+        MONASPACE_NEON_COUNT=$(ls /usr/share/fonts/monaspace-neon/*.otf | wc -l)
+        if [ "$MONASPACE_NEON_COUNT" -eq 42 ]; then
+            echo "  ok    Monaspace Neon has 42 OTF files"
+        else
+            echo "  MISS  Monaspace Neon has ${MONASPACE_NEON_COUNT} OTF files, expected 42"; FAIL=1
+        fi
+        MONASPACE_NEON_FILE=$(/usr/bin/fc-match -f "%{file}" "Monaspace Neon")
+        case "$MONASPACE_NEON_FILE" in
+            /usr/share/fonts/monaspace-neon/*) echo "  ok    fc-match Monaspace Neon resolves to monaspace-neon" ;;
+            *) echo "  MISS  fc-match Monaspace Neon resolves to ${MONASPACE_NEON_FILE:-missing}"; FAIL=1 ;;
+        esac
+    fi
 
     # Container-collision hardening. distrobox shares $HOME, but its system font
     # tree differs from the host. 06-bluefin-host-font-dir-salt.conf gives every
