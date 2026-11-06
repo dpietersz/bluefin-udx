@@ -8,10 +8,12 @@
 
 ## What this is (and isn't)
 
-This is the [bootc](https://containers.github.io/bootc/) image I run as my **daily driver** on two Lenovo ThinkPads:
+This repository builds [bootc](https://containers.github.io/bootc/) images for my Lenovo ThinkPads:
 
-- **T580** (Intel iGPU only) — runs `ghcr.io/dpietersz/bluefin-udx:stable`
-- **P14s Gen5 i7** (Intel + NVIDIA RTX) — runs `ghcr.io/dpietersz/bluefin-udx-nvidia:stable`
+- **T580** (Intel iGPU only) — `ghcr.io/dpietersz/bluefin-udx:stable` today; Vitta is the testing replacement.
+- **P14s Gen5 i7** (Intel + NVIDIA RTX) — `ghcr.io/dpietersz/bluefin-udx-nvidia:stable`.
+
+[Vitta](#vitta-testing--t580-first) is a personal, GNOME-free niri desktop on Universal Blue's desktop-less `base-main:44`. It reuses the shared UDX module set and adds the desktop plumbing Bluefin DX supplied; CI publishes it only as `ghcr.io/dpietersz/vitta:testing` until the T580 acceptance checklist is complete.
 
 It is **not** a community distro. It is **not** seeking users or contributors. It exists because:
 
@@ -83,6 +85,31 @@ On Bluefin with `bootc` CLI present:
 ```bash
 sudo bootc switch ghcr.io/<you>/<your-image>:stable
 ```
+
+## Vitta (testing — T580 first)
+
+Vitta is not yet the T580 daily driver. After its PR is merged and CI has published a testing image, switch the T580 with:
+
+```bash
+sudo bootc switch ghcr.io/dpietersz/vitta:testing
+sudo systemctl reboot
+```
+
+The image carries the same trust policy as the UDX images. After one unverified bootstrap deployment, use the signed transport on subsequent switches:
+
+```bash
+sudo bootc switch ostree-image-signed:docker://ghcr.io/dpietersz/vitta:testing
+sudo systemctl reboot
+```
+
+If acceptance fails, return to the previous deployment:
+
+```bash
+sudo bootc rollback
+sudo systemctl reboot
+```
+
+Vitta's T580-first acceptance remains pending. CI publishes `:testing`, date, and commit-SHA tags only; it never publishes `vitta:stable`. See the [design](docs/superpowers/specs/2026-11-06-vitta-design.md) and [implementation plan](docs/superpowers/plans/2026-11-06-vitta.md).
 
 ## Daily updates
 
