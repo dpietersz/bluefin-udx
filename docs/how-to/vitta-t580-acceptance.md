@@ -49,6 +49,30 @@ chezmoi apply
 sudo systemctl reboot
 ```
 
+### If the greeter does not appear
+
+The first greetd boot exercises pieces no CI step can: `systemd-sysusers` creating the `greetd` user, the `/etc` merge pointing `display-manager.service` at `greetd.service`, logind seat access for cage, and SELinux for cage and Quickshell. If any of them fails, greetd restart-loops and VT1 stays blank.
+
+1. Press `Ctrl+Alt+F2` (or `Ctrl+Alt+F3`) for a text console; cage runs with `-s`, so VT switching works even while the greeter is up. Log in with the normal account.
+2. Collect the evidence before changing anything, and record it in the check 1 or 2 notes:
+
+   ```bash
+   journalctl -b -u greetd -u systemd-sysusers
+   getent passwd greetd
+   ls -ldZ /var/lib/greetd
+   readlink -f /etc/systemd/system/display-manager.service
+   sudo ausearch -m avc -ts boot
+   ```
+
+3. Return to the previous `bluefin-udx` deployment:
+
+   ```bash
+   sudo bootc rollback && sudo systemctl reboot
+   ```
+
+   If no console login works, reboot and pick the previous deployment in the GRUB menu instead (press `Esc` during boot to show the menu); then run `sudo bootc rollback` from the booted `bluefin-udx` so it stays the default.
+4. Back on `bluefin-udx`, refresh Chezmoi's data as in check 10 (`chezmoi init && chezmoi apply`).
+
 ## Acceptance checks
 
 ### 1. LUKS boot prompt
@@ -61,7 +85,7 @@ At the switch reboot, enter the normal LUKS passphrase. The stock prompt must un
 
 ### 2. Greeter, login, and keyring
 
-At the greeter, compare its palette with the currently selected mode, log in, then confirm the login keyring is unlocked. Open Teams and Storage Explorer; neither may request a separate keyring password.
+At the greeter, compare its palette with the currently selected mode. Boot once docked (laptop plus external monitor) and once undocked: the login card must sit whole and centred on one screen, never straddling the seam. Log in, then confirm the login keyring is unlocked. Open Teams and Storage Explorer; neither may request a separate keyring password.
 
 ```bash
 vitta-theme mode
@@ -94,16 +118,21 @@ Expected: `Type=wayland`; `XDG_CURRENT_DESKTOP` contains `GNOME`; Chezmoi report
 
 ### 4. Lock screen in both modes
 
-Test once while `vitta-theme mode` reports `light` and once while it reports `dark`. `vitta-theme mode --at` only evaluates a hypothetical time and cannot control Hyprlock, so use the live mode for each lock. Lock with the command below (or `Ctrl+Alt+L`), verify the four-stripe Vitta look, and unlock with the account password.
+Test once while `vitta-theme mode` reports `light` and once while it reports `dark`. `vitta-theme mode --at` only evaluates a hypothetical time and cannot control Hyprlock, so use the live mode for each lock. Lock with the command below (or `Ctrl+Alt+L`), verify the four-stripe Vitta look, and unlock with the account password. While locked, photograph the screen (hyprlock blocks screenshots) and check that the logo, clock, date, password field and `host · vitta <version>` footer do not overlap and match the greeter's clock and date.
 
 ```bash
 vitta-theme mode
 ~/.local/bin/scripts/niri-lock.sh
 # After unlocking:
-grep -im1 'mode' ~/.cache/vitta/hyprlock-theme.conf
+head -n1 ~/.cache/vitta/hyprlock-theme.conf
 ```
 
-The mode header in `~/.cache/vitta/hyprlock-theme.conf` must match the live `vitta-theme mode` result. Repeat at the other live mode.
+Expected: `# vitta-theme render hyprlock --mode light` or `… --mode dark`, matching the live `vitta-theme mode` result. Any other first line means a fallback was used, which fails this check:
+
+- `# Pre-Vitta Gruvbox fallback: valid even when vitta-theme is unavailable.` — `vitta-theme` could not render, so `niri-lock.sh` wrote the classic pre-Vitta visuals into the cache file.
+- A missing file, or one older than the lock (`ls -l --time-style=full-iso ~/.cache/vitta/hyprlock-theme.conf`), together with `niri-lock: using static fallback config` on the lock command's output — the cache could not be written, so hyprlock ran on the static `~/.config/hypr/hyprlock-pre-vitta.conf`.
+
+Repeat at the other live mode.
 
 > **Result:** [ ] Pass  [ ] Fail
 >
@@ -178,13 +207,14 @@ Expected: the guest is running and exposes `Z:` (read-only `~/dev`), `Y:` (read/
 
 ```bash
 getent passwd "$USER"
+grep -x /home/linuxbrew/.linuxbrew/bin/bash /etc/shells
 bash -lc 'command -v brew && brew --version'
 zeditor --version
 code --version
 tailscale status
 ```
 
-Expected: the account's login shell is `/bin/bash`; the Bash login shell finds Homebrew; Zed, VS Code, and Tailscale all respond; Tailscale reports the machine online.
+Expected: the account's login shell is Homebrew Bash, `/home/linuxbrew/.linuxbrew/bin/bash` (set by the dotfiles' `run_once_after_05-set-default-shell-bash`), and `/etc/shells` still lists it after the switch; the Bash login shell finds Homebrew; Zed, VS Code, and Tailscale all respond; Tailscale reports the machine online.
 
 > **Result:** [ ] Pass  [ ] Fail
 >
@@ -197,10 +227,12 @@ Run this last: it ends the Vitta trial deployment.
 ```bash
 sudo bootc rollback
 sudo systemctl reboot
+# After logging in to bluefin-udx:
 rpm-ostree status
+chezmoi init && chezmoi apply
 ```
 
-Expected: the T580 boots its previous `bluefin-udx` deployment cleanly and `rpm-ostree status` shows it as booted.
+Expected: the T580 boots its previous `bluefin-udx` deployment cleanly and `rpm-ostree status` shows it as booted. `chezmoi init` must run after the rollback: until it does, the cached Chezmoi data still says `isVitta = true`, so `verify-image` warns that `bluefin-udx` is the wrong variant and, with no `vitta-theme` on `bluefin-udx`, every lock goes through `niri-lock.sh`'s fallback path instead of the classic configuration.
 
 > **Result:** [ ] Pass  [ ] Fail
 >

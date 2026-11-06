@@ -91,16 +91,11 @@ sudo bootc switch ghcr.io/<you>/<your-image>:stable
 Vitta is not yet the T580 daily driver. After its PR is merged and CI has published a testing image, switch the T580 with:
 
 ```bash
-sudo bootc switch ghcr.io/dpietersz/vitta:testing
+sudo bootc switch --enforce-container-sigpolicy ghcr.io/dpietersz/vitta:testing
 sudo systemctl reboot
 ```
 
-The image carries the same trust policy as the UDX images. After one unverified bootstrap deployment, use the signed transport on subsequent switches:
-
-```bash
-sudo bootc switch ostree-image-signed:docker://ghcr.io/dpietersz/vitta:testing
-sudo systemctl reboot
-```
+The image carries the same trust policy as the UDX images, and a machine on `bluefin-udx` already trusts the `ghcr.io/dpietersz` signing key, so the signature is enforced from the first switch. The full checklist, including recovery if the greeter does not appear, is [`docs/how-to/vitta-t580-acceptance.md`](docs/how-to/vitta-t580-acceptance.md).
 
 If acceptance fails, return to the previous deployment:
 
