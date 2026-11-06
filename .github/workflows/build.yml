@@ -466,6 +466,83 @@ jobs:
                 else
                     echo "  ok    no gnome-session* / cockpit* / setroubleshoot* / sysstat"
                 fi
+                echo "Vitta desktop plumbing, dev tools, integrations (vitta-modules.yml):"
+                # Task 1 gap-analysis ADD set (Noto as the vf names bluefin-dx shipped) plus
+                # the akmods-built v4l2loopback kmod.
+                for p in android-tools code containerd.io docker-buildx-plugin docker-ce docker-ce-cli \
+                         docker-ce-rootless-extras docker-compose-plugin edk2-ovmf gcc gnome-keyring gnome-keyring-pam \
+                         google-noto-sans-vf-fonts google-noto-serif-vf-fonts google-noto-color-emoji-fonts \
+                         gvfs gvfs-gphoto2 gvfs-mtp libvirt-client libvirt-daemon-kvm make nautilus podman-compose \
+                         qemu-kvm swtpm tailscale tuned tuned-ppd virt-install virt-manager virt-viewer virtiofsd \
+                         xdg-desktop-portal-gnome xdg-user-dirs kmod-v4l2loopback; do check_rpm "$p"; done
+                # x86 KVM only: base-main ships qemu-user-static-aarch64 (removed in
+                # vitta-modules.yml) and qemu-kvm must not drag in foreign emulators.
+                VITTA_QEMU_FOREIGN=$(rpm -qa --qf "%{NAME}\n" | grep -E "^qemu-(user-static|system-)" | grep -Evx "qemu-system-x86(-core)?" || true)
+                if [ -n "$VITTA_QEMU_FOREIGN" ]; then
+                    echo "  FAIL  non-x86 qemu installed: $(echo $VITTA_QEMU_FOREIGN)"
+                    FAIL=1
+                else
+                    echo "  ok    no qemu-user-static* / non-x86 qemu-system-*"
+                fi
+                check_file /etc/yum.repos.d/vscode.repo
+                VSCODE_KEY_SHA256=$(sha256sum /etc/pki/rpm-gpg/microsoft.asc 2>/dev/null | cut -d " " -f 1)
+                if [ "$VSCODE_KEY_SHA256" = "2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6" ]; then
+                    echo "  ok    Microsoft signing key checksum"
+                else
+                    echo "  FAIL  Microsoft signing key missing or checksum mismatch"
+                    FAIL=1
+                fi
+                # Offline query of unit symlinks/presets; needs no running systemd.
+                for VITTA_UNIT in vitta-groups.service vitta-libvirt-relabel.service tailscaled.service docker.socket \
+                                  brew-setup.service brew-update.timer brew-upgrade.timer; do
+                    VITTA_UNIT_STATE=$(systemctl is-enabled "$VITTA_UNIT" 2>/dev/null || true)
+                    if [ "$VITTA_UNIT_STATE" = enabled ]; then
+                        echo "  ok    $VITTA_UNIT enabled"
+                    else
+                        echo "  FAIL  $VITTA_UNIT is ${VITTA_UNIT_STATE:-missing}, expected enabled"
+                        FAIL=1
+                    fi
+                done
+                if [ -x /usr/libexec/vitta/vitta-groups ]; then
+                    echo "  ok    /usr/libexec/vitta/vitta-groups executable"
+                else
+                    echo "  FAIL  /usr/libexec/vitta/vitta-groups missing or not executable"
+                    FAIL=1
+                fi
+                # vitta-groups needs both groups at boot: either baked by an RPM scriptlet
+                # into /usr/lib/group (nss-altfiles) or declared for systemd-sysusers.
+                for VITTA_GROUP in docker libvirt; do
+                    if getent group "$VITTA_GROUP" >/dev/null || grep -Eqs "^g[[:space:]]+$VITTA_GROUP[[:space:]]" /usr/lib/sysusers.d/*.conf; then
+                        echo "  ok    group $VITTA_GROUP defined for boot"
+                    else
+                        echo "  FAIL  group $VITTA_GROUP neither in group databases nor sysusers.d"
+                        FAIL=1
+                    fi
+                done
+                # The brew module bakes Homebrew under /usr/share/homebrew; brew-setup copies
+                # it to /var/home/linuxbrew on first boot (empty /var in this container).
+                if [ -x /usr/share/homebrew/home/linuxbrew/.linuxbrew/bin/brew ]; then
+                    echo "  ok    Homebrew baked at /usr/share/homebrew"
+                else
+                    echo "  FAIL  /usr/share/homebrew/home/linuxbrew/.linuxbrew/bin/brew missing"
+                    FAIL=1
+                fi
+                if grep -qx "HOMEBREW_NO_ANALYTICS=1" /etc/environment 2>/dev/null; then
+                    echo "  ok    Homebrew analytics disabled"
+                else
+                    echo "  FAIL  HOMEBREW_NO_ANALYTICS=1 missing from /etc/environment"
+                    FAIL=1
+                fi
+                # uname -r is the CI host kernel; resolve against the image kernel. Lookup by
+                # name also proves depmod indexed the module, which modprobe needs at boot.
+                VITTA_KVER=$(rpm -q --qf "%{VERSION}-%{RELEASE}.%{ARCH}\n" kernel-core | tail -n 1)
+                V4L2_SIGNER=$(modinfo -k "$VITTA_KVER" -F signer v4l2loopback 2>/dev/null || true)
+                if [ -n "$V4L2_SIGNER" ]; then
+                    echo "  ok    v4l2loopback for $VITTA_KVER signed by: $V4L2_SIGNER"
+                else
+                    echo "  FAIL  v4l2loopback not resolvable or unsigned for kernel $VITTA_KVER"
+                    FAIL=1
+                fi
             fi
             echo "Phase 0 bootstrap binaries:"
             for bin in pass gpg pinentry-curses age ssh git jq curl; do check_bin "$bin"; done
@@ -615,12 +692,18 @@ jobs:
             # is no zeditor. Dotfiles launch "zeditor", so losing zfs upstream (e.g. a
             # base without ublue akmods) changes the editor command - see MAINTENANCE.md.
             # Vitta has no zfs by design, so Terra resolves plain zed-cli; the
-            # zeditor name dotfiles launch is a Vitta overlay link (later task).
+            # zeditor name dotfiles launch is the files/vitta symlink zeditor -> zed.
             if [ "$RECIPE_NAME" = "vitta" ]; then
                 if rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zed-cli-"; then
                     echo "  ok    /usr/bin/zed owned by Terra zed-cli (no zfs on Vitta)"
                 else
                     echo "  FAIL  Vitta /usr/bin/zed not owned by Terra zed-cli"
+                    FAIL=1
+                fi
+                if [ "$(readlink /usr/bin/zeditor)" = zed ] && [ -x /usr/bin/zeditor ]; then
+                    echo "  ok    /usr/bin/zeditor -> zed (Vitta overlay link)"
+                else
+                    echo "  FAIL  /usr/bin/zeditor is not a working link to zed"
                     FAIL=1
                 fi
             elif rpm -q zfs >/dev/null 2>&1; then
@@ -735,13 +818,9 @@ jobs:
             check_bin v4l2-ctl
             check_rpm mediainfo
             check_bin mediainfo
-            # bluefin-dx ships the ublue-signed kmod; base-main does not. Vitta
-            # adds it via the akmods module in vitta-modules.yml (later task).
-            if [ "$RECIPE_NAME" = "vitta" ]; then
-                echo "  skip  kmod-v4l2loopback (not yet added to Vitta)"
-            else
-                check_rpm kmod-v4l2loopback
-            fi
+            # bluefin-dx ships the ublue-signed kmod; Vitta builds the same one
+            # with the akmods module in vitta-modules.yml.
+            check_rpm kmod-v4l2loopback
             check_file /etc/modules-load.d/v4l2loopback.conf
             check_file /etc/modprobe.d/v4l2loopback.conf
             if ! grep -q "video_nr=10" /etc/modprobe.d/v4l2loopback.conf; then
