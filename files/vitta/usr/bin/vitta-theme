@@ -154,7 +154,7 @@ image {{
     monitor =
     path = {logo_dir / f'logo-{mode}.png'}
     size = 160, 160
-    position = 0, 225
+    position = 0, 120
     halign = center
     valign = center
 }}
@@ -165,7 +165,7 @@ label {{
     color = {rgba(colors['fg'])}
     font_size = 96
     font_family = Monaspace Neon
-    position = 0, 75
+    position = 0, 45
     halign = center
     valign = center
 }}
@@ -176,7 +176,7 @@ label {{
     color = {rgba(colors['muted'])}
     font_size = 20
     font_family = Monaspace Neon
-    position = 0, -10
+    position = 0, -45
     halign = center
     valign = center
 }}
@@ -196,7 +196,18 @@ input-field {{
     fade_on_empty = true
     placeholder_text = <i>Password…</i>
     fail_text = <i>$FAIL <b>($ATTEMPTS)</b></i>
-    position = 0, -125
+    position = 0, -115
+    halign = center
+    valign = center
+}}
+
+label {{
+    monitor =
+    text = cmd[update:1000] echo "$USER@$HOSTNAME"
+    color = {rgba(colors['muted'])}
+    font_size = 16
+    font_family = Monaspace Neon
+    position = 0, -170
     halign = center
     valign = center
 }}"""
