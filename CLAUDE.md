@@ -129,12 +129,12 @@ Validation is the regression tests plus the build gate and smoke-boot. Run focus
 
 ## When making changes
 
-1. **Adding a package**: Decide it actually belongs here (see division of responsibility + `RECIPE.md` bake criteria). Add to `recipes/common.yml` under the correct Phase. Add a row to `RECIPE.md` with source, bake reason, fallback. Add the matching `check_rpm` / `check_bin` to `scripts/local-build-test.sh`. Run `./scripts/local-build-test.sh` for both variants before pushing.
-2. **Adding a vendor repo**: If upstream's `.repo` file is broken (e.g. `gpgkey=` pointing at a signature file like Beekeeper Studio did), ship a corrected version at `files/system/etc/yum.repos.d/` rather than fighting upstream. Note it explicitly in `common.yml` so the next reader doesn't re-add the broken URL.
+1. **Adding a package**: Decide it actually belongs here (see division of responsibility + `RECIPE.md` bake criteria). Shared packages go in `recipes/common.yml` under the correct Phase and are built into `bluefin-udx`, `bluefin-udx-nvidia`, and `vitta`. Vitta-only packages and files go in `recipes/vitta-modules.yml` and `files/vitta/`, never `files/system/`. Add a row to `RECIPE.md` with source, bake reason, and fallback. Add matching `check_rpm` / `check_bin` coverage to both smoke gates: the inline gate in `.github/workflows/build.yml` and `scripts/local-build-test.sh`; put Vitta-only checks in each gate's Vitta branch. For shared changes, run `./scripts/local-build-test.sh bluefin-udx`, `./scripts/local-build-test.sh bluefin-udx-nvidia`, and `./scripts/local-build-test.sh vitta` before pushing; for Vitta-only changes, run the Vitta recipe.
+2. **Adding a vendor repo**: If upstream's `.repo` file is broken (e.g. `gpgkey=` pointing at a signature file like Beekeeper Studio did), ship a corrected shared repo at `files/system/etc/yum.repos.d/` rather than fighting upstream. Put Vitta-only repos in `files/vitta/etc/yum.repos.d/`. Note it explicitly in the owning recipe so the next reader doesn't re-add the broken URL.
 3. **Adding a COPR**: Verify it's had a build in the last 90 days and supports `%OS_VERSION%` substitution. Document the fallback in `RECIPE.md`. Add it to the quarterly check in `MAINTENANCE.md`.
 4. **Anything CUDA**: Do not bake `cuda-toolkit`. The atomic FS strips `/usr/local` at commit and the RPM installs there. Use `nvcr.io/nvidia/cuda:*-devel-fedora41` containers per-project (rationale is documented inline in `bluefin-udx-nvidia.yml`).
 5. **Anything that needs the toolbox**: Do not add it here. Push to `~/dev/Projects/boxkit` (`udx-toolbox`), and the `~/dotfiles` auto-export wiring will handle host integration.
-6. **Anything that's user-scope config**: Do not add it here. Push to `~/dotfiles` (chezmoi). System config files that *must* exist at boot before chezmoi runs go in `files/system/`.
+6. **Anything that's user-scope config**: Do not add it here. Push to `~/dotfiles` (chezmoi). Shared system config that *must* exist at boot before chezmoi runs goes in `files/system/`; Vitta-only system config goes in `files/vitta/`.
 
 ## Niri / Electron keyring trap (don't break this)
 
