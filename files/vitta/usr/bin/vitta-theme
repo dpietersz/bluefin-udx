@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""Select and render Vitta's shared day/night Gruvbox theme."""
+
+import argparse
+from datetime import date, datetime, time, timedelta, timezone
+import json
+import math
+from pathlib import Path
+import sys
+import tomllib
+from zoneinfo import ZoneInfo
+
+
+DEFAULT_LATITUDE = 52.37
+DEFAULT_LONGITUDE = 4.90
+DEFAULT_CONFIG = Path("/etc/vitta/theme.conf")
+DEFAULT_PALETTE = Path("/usr/share/vitta/theme/palette.toml")
+DEFAULT_LOGO_DIR = Path("/usr/share/vitta/theme")
+PALETTE_KEYS = ("bg", "fg", "stripe1", "stripe2", "stripe3", "stripe4", "muted", "error")
+ZENITH = 90.833
+
+
+def solar_terms(day: date) -> tuple[float, float]:
+    """Return NOAA equation-of-time minutes and declination radians for *day*."""
+    gamma = 2 * math.pi / 365 * (day.timetuple().tm_yday - 1)
+    equation_of_time = 229.18 * (
+        0.000075
+        + 0.001868 * math.cos(gamma)
+        - 0.032077 * math.sin(gamma)
+        - 0.014615 * math.cos(2 * gamma)
+        - 0.040849 * math.sin(2 * gamma)
+    )
+    declination = (
+        0.006918
+        - 0.399912 * math.cos(gamma)
+        + 0.070257 * math.sin(gamma)
+        - 0.006758 * math.cos(2 * gamma)
+        + 0.000907 * math.sin(2 * gamma)
+        - 0.002697 * math.cos(3 * gamma)
+        + 0.00148 * math.sin(3 * gamma)
+    )
+    return equation_of_time, declination
+
+
+def sun_times(day: date, lat: float, lon: float, tz: ZoneInfo) -> tuple[datetime | None, datetime | None]:
+    """Return local sunrise and sunset using the NOAA fractional-year formula."""
+    equation_of_time, declination = solar_terms(day)
+    latitude = math.radians(lat)
+    cos_hour_angle = (
+        math.cos(math.radians(ZENITH)) / (math.cos(latitude) * math.cos(declination))
+        - math.tan(latitude) * math.tan(declination)
+    )
+    if not -1 <= cos_hour_angle <= 1:
+        return None, None
+
+    hour_angle = math.degrees(math.acos(cos_hour_angle))
+    solar_noon = 720 - 4 * lon - equation_of_time
+    midnight_utc = datetime.combine(day, time(), tzinfo=timezone.utc)
+    sunrise = midnight_utc + timedelta(minutes=solar_noon - 4 * hour_angle)
+    sunset = midnight_utc + timedelta(minutes=solar_noon + 4 * hour_angle)
+    return sunrise.astimezone(tz), sunset.astimezone(tz)
+
+
+def noon_elevation(day: date, lat: float) -> float:
+    """Return the solar elevation in degrees at local solar noon."""
+    _, declination = solar_terms(day)
+    latitude = math.radians(lat)
+    return math.degrees(math.asin(
+        math.sin(latitude) * math.sin(declination)
+        + math.cos(latitude) * math.cos(declination)
+    ))
+
+
+def mode_at(when: datetime, lat: float, lon: float) -> str:
+    """Return light during local daylight and dark otherwise."""
+    if when.tzinfo is None:
+        when = when.astimezone()
+    sunrise, sunset = sun_times(when.date(), lat, lon, when.tzinfo)
+    if sunrise is None or sunset is None:
+        return "light" if noon_elevation(when.date(), lat) > 0 else "dark"
+    return "light" if sunrise <= when <= sunset else "dark"
+
+
+def local_palette_path() -> Path:
+    """Use the source-tree palette when this script runs before image installation."""
+    if DEFAULT_PALETTE.exists():
+        return DEFAULT_PALETTE
+    return Path(__file__).resolve().parents[1] / "share/vitta/theme/palette.toml"
+
+
+def load_coordinates(path: Path) -> tuple[float, float]:
+    """Load valid coordinates, falling back safely to Amsterdam on any error."""
+    try:
+        values = tomllib.loads(path.read_text())
+        latitude = float(values["latitude"])
+        longitude = float(values["longitude"])
+        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+            raise ValueError("coordinates are out of range")
+        return latitude, longitude
+    except Exception as error:
+        print(
+            f"warning: could not load {path}: {error}; using Amsterdam defaults",
+            file=sys.stderr,
+        )
+        return DEFAULT_LATITUDE, DEFAULT_LONGITUDE
+
+
+def load_palette(path: Path) -> dict[str, dict[str, str]]:
+    """Load and validate Vitta's shared palette."""
+    values = tomllib.loads(path.read_text())
+    palette = {}
+    for mode in ("dark", "light"):
+        colors = values[mode]
+        if set(colors) != set(PALETTE_KEYS):
+            raise ValueError(f"{mode} palette must contain exactly: {', '.join(PALETTE_KEYS)}")
+        if not all(isinstance(colors[key], str) and colors[key].startswith("#") for key in PALETTE_KEYS):
+            raise ValueError(f"{mode} palette contains invalid colours")
+        palette[mode] = {key: colors[key] for key in PALETTE_KEYS}
+    return palette
+
+
+def rgba(color: str) -> str:
+    """Convert a #RRGGBB palette colour to hyprlock's opaque rgba form."""
+    return f"rgba({color.removeprefix('#')}ff)"
+
+
+def render_hyprlock(colors: dict[str, str], mode: str, logo_dir: Path) -> str:
+    """Render the Vitta-owned portion of a hyprlock configuration."""
+    shapes = []
+    for index, stripe in enumerate(("stripe1", "stripe2", "stripe3", "stripe4")):
+        width = 560 - index * 10
+        height = 460 - index * 10
+        rounding = max(0, 14 - index * 5)
+        shapes.append(f"""shape {{
+    monitor =
+    size = {width}, {height}
+    color = {rgba(colors['bg'])}
+    border_size = 5
+    border_color = {rgba(colors[stripe])}
+    rounding = {rounding}
+    position = 0, 0
+    halign = center
+    valign = center
+}}""")
+
+    return f"""background {{
+    monitor =
+    color = {rgba(colors['bg'])}
+}}
+
+{'\n\n'.join(shapes)}
+
+image {{
+    monitor =
+    path = {logo_dir / f'logo-{mode}.png'}
+    size = 160, 160
+    position = 0, 225
+    halign = center
+    valign = center
+}}
+
+label {{
+    monitor =
+    text = cmd[update:1000] date "+%H:%M"
+    color = {rgba(colors['fg'])}
+    font_size = 96
+    font_family = Monaspace Neon
+    position = 0, 75
+    halign = center
+    valign = center
+}}
+
+label {{
+    monitor =
+    text = cmd[update:1000] date "+%A, %d %B"
+    color = {rgba(colors['muted'])}
+    font_size = 20
+    font_family = Monaspace Neon
+    position = 0, -10
+    halign = center
+    valign = center
+}}
+
+input-field {{
+    monitor =
+    size = 320, 50
+    outline_thickness = 2
+    dots_size = 0.25
+    dots_spacing = 0.55
+    outer_color = {rgba(colors['stripe1'])}
+    inner_color = {rgba(colors['bg'])}
+    font_color = {rgba(colors['fg'])}
+    fail_color = {rgba(colors['error'])}
+    check_color = {rgba(colors['stripe1'])}
+    font_family = Monaspace Neon
+    fade_on_empty = true
+    placeholder_text = <i>Password…</i>
+    fail_text = <i>$FAIL <b>($ATTEMPTS)</b></i>
+    position = 0, -125
+    halign = center
+    valign = center
+}}"""
+
+
+def parse_time(value: str) -> datetime:
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"invalid ISO8601 time: {value}") from error
+
+
+def command_mode(args: argparse.Namespace) -> None:
+    latitude, longitude = load_coordinates(args.config)
+    when = args.at if args.at is not None else datetime.now().astimezone()
+    print(mode_at(when, latitude, longitude))
+
+
+def command_palette(args: argparse.Namespace) -> None:
+    colors = load_palette(local_palette_path())[args.mode]
+    if args.json:
+        print(json.dumps(colors))
+    else:
+        for key, value in colors.items():
+            print(f"{key} = {value}")
+
+
+def command_render(args: argparse.Namespace) -> None:
+    colors = load_palette(args.palette)[args.mode]
+    print(render_hyprlock(colors, args.mode, args.logo_dir))
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    mode = commands.add_parser("mode", help="print the current light or dark mode")
+    mode.add_argument("--at", type=parse_time, help="ISO8601 time to evaluate")
+    mode.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="theme coordinate config")
+    mode.set_defaults(handler=command_mode)
+
+    palette = commands.add_parser("palette", help="print a palette")
+    palette.add_argument("--mode", choices=("light", "dark"), required=True)
+    palette.add_argument("--json", action="store_true", help="emit a JSON object")
+    palette.set_defaults(handler=command_palette)
+
+    render = commands.add_parser("render", help="render a consumer configuration fragment")
+    render.add_argument("target", choices=("hyprlock",))
+    render.add_argument("--mode", choices=("light", "dark"), required=True)
+    render.add_argument("--palette", type=Path, default=local_palette_path())
+    render.add_argument("--logo-dir", type=Path, default=DEFAULT_LOGO_DIR)
+    render.set_defaults(handler=command_render)
+
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    args.handler(args)
+
+
+if __name__ == "__main__":
+    main()
