@@ -1,0 +1,18 @@
+#!/bin/bash
+# vitta-greeter — greetd's default_session (see /etc/greetd/config.toml).
+# Runs as the greetd user: cage gives the Quickshell greeter a fullscreen
+# Wayland output; -s keeps VT switching available for recovery.
+set -euo pipefail
+
+# greetd hands the greeter a minimal environment; Theme.qml resolves
+# vitta-theme through PATH.
+export PATH="${PATH:-/usr/local/bin:/usr/bin}:/usr/sbin"
+
+# Keep Quickshell's config/cache/state in greetd's own home
+# (/var/lib/greetd, created by greetd's tmpfiles.d), never in /.
+GREETD_HOME=/var/lib/greetd
+export XDG_CONFIG_HOME="$GREETD_HOME/.config"
+export XDG_CACHE_HOME="$GREETD_HOME/.cache"
+export XDG_STATE_HOME="$GREETD_HOME/.local/state"
+
+exec cage -s -- quickshell -p /usr/share/vitta/greeter/shell.qml
