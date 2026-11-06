@@ -601,6 +601,8 @@ jobs:
                 VITTA_NIGHT=$(vitta-theme mode --at 2026-06-21T00:30+02:00 2>/dev/null || true)
                 if [ "$VITTA_DAY/$VITTA_NIGHT" = light/dark ]; then echo "  ok    vitta-theme mode: noon light, 00:30 dark"; else echo "  FAIL  vitta-theme mode noon/00:30 = ${VITTA_DAY:-?}/${VITTA_NIGHT:-?}, expected light/dark"; FAIL=1; fi
                 if [ -s /usr/share/vitta/theme/logo-dark.png ] && [ -s /usr/share/vitta/theme/logo-light.png ]; then echo "  ok    greeter logos"; else echo "  FAIL  /usr/share/vitta/theme/logo-{dark,light}.png missing or empty"; FAIL=1; fi
+                # ostree populates /var only on first deploy; a rebased machine needs tmpfiles.
+                if grep -Eqs "^d[[:space:]]+/var/lib/greetd[[:space:]]" /usr/lib/tmpfiles.d/*.conf; then echo "  ok    /var/lib/greetd created by tmpfiles.d"; else echo "  FAIL  no tmpfiles.d d-line creates /var/lib/greetd"; FAIL=1; fi
                 if [ -x /usr/libexec/vitta/vitta-greeter ]; then echo "  ok    /usr/libexec/vitta/vitta-greeter executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greeter missing or not executable"; FAIL=1; fi
                 if VITTA_QS_VERSION=$(quickshell --version 2>&1); then echo "  ok    $VITTA_QS_VERSION"; else echo "  FAIL  quickshell --version: $VITTA_QS_VERSION"; FAIL=1; fi
                 # Behavioural: load the production greeter QML headless. Catches QML type and
@@ -611,7 +613,7 @@ jobs:
                 if printf "%s\n" "$VITTA_QS_LOG" | grep -q "Configuration Loaded" && [ -z "$VITTA_QS_BAD" ]; then
                     echo "  ok    greeter QML loads headless"
                 else
-                    echo "  FAIL  greeter QML did not load cleanly:"; printf "%s\n" "$VITTA_QS_LOG" | tail -n 20 | sed "s/^/          /"; FAIL=1
+                    echo "  FAIL  greeter QML did not load cleanly:"; printf "%s\n" "$VITTA_QS_LOG" | grep -v inotify | tail -n 20 | sed "s/^/          /"; FAIL=1
                 fi
             fi
             echo "Phase 0 bootstrap binaries:"
