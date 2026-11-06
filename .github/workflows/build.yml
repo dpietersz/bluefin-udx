@@ -386,11 +386,17 @@ jobs:
       # SMOKE-BOOT GATE.
       # Boot the just-built image, verify expected binaries + config files.
       # ----------------------------------------------------------------------
+      # The recipe arrives via env, never as an inline ${{ }} in the script:
+      # GitHub evaluates a run: block containing any expression as ONE
+      # expression string, capped at 21000 chars, and this gate outgrew that
+      # (2026-11-06 dispatch rejected: "Exceeded max expression length 21000").
       - name: Smoke-boot test
         id: smoke
+        env:
+          RECIPE: ${{ matrix.recipe }}
         run: |
           set -euo pipefail
-          IMAGE="localhost/${{ matrix.recipe }}:latest"
+          IMAGE="localhost/${RECIPE}:latest"
           if ! sudo podman image exists "$IMAGE"; then
             echo "FAIL: $IMAGE not in podman store"
             sudo podman images
@@ -399,7 +405,7 @@ jobs:
           echo "Smoke-testing $IMAGE"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
-          sudo podman run --rm --entrypoint /bin/bash "$IMAGE" -c '
+          sudo podman run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
             set -e
             FAIL=0
             check_bin() {
@@ -430,7 +436,7 @@ jobs:
             echo "  ok    rpmdb readable ($(rpm -qa | wc -l) packages)"
             # Vitta = base-main + common.yml, no Bluefin layer. Assertions that
             # only hold because bluefin-dx supplied something are gated on this.
-            RECIPE_NAME="${{ matrix.recipe }}"
+            # RECIPE_NAME is passed in with podman run -e (see step env).
             if [ "$RECIPE_NAME" = "vitta" ]; then
                 echo "Vitta identity:"
                 # Parse, do not grep a fixed spelling: the BlueBuild os-release
@@ -896,7 +902,7 @@ jobs:
 
             # NVIDIA variant adds nvtop. CUDA toolkit not baked — use
             # nvidia/cuda containers per project (atomic /usr/local quirk).
-            if [ "${{ matrix.recipe }}" = "bluefin-udx-nvidia" ]; then
+            if [ "$RECIPE_NAME" = "bluefin-udx-nvidia" ]; then
                 echo "Phase 4 NVIDIA additions:"
                 check_rpm nvtop
                 check_bin nvtop
