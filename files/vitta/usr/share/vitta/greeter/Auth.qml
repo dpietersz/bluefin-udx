@@ -144,8 +144,14 @@ Scope {
         signal error(string error)
 
         property var steps: []
+        // Call log read by selftest.qml (vitta-greeter-preview --selftest).
+        property int createCount: 0
+        property int cancelCount: 0
+        property var responses: []
+        property var launches: []
 
         function createSession(name) {
+            createCount++;
             console.info("preview: createSession(" + name + "), scenario " + auth.scenario);
             switch (auth.scenario) {
             case "badpass":
@@ -165,10 +171,12 @@ Scope {
 
         function respond(response) {
             console.info("preview: respond(<" + response.length + " chars>)");
+            responses = responses.concat([response]);
             fakeTimer.restart();
         }
 
         function cancelSession() {
+            cancelCount++;
             steps = [];
             fakeTimer.stop();
         }
@@ -177,6 +185,7 @@ Scope {
             // Never exec anything from the preview, and keep the window open.
             console.info("preview: launch(" + JSON.stringify(command) + ", " + JSON.stringify(environment)
                          + ", quit=" + quit + ") - not executed");
+            launches = launches.concat([{ command: command, environment: environment, quit: quit }]);
             launched();
         }
 

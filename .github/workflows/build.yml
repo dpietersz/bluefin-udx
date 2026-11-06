@@ -615,6 +615,21 @@ jobs:
                 else
                     echo "  FAIL  greeter QML did not load cleanly:"; printf "%s\n" "$VITTA_QS_LOG" | grep -v inotify | tail -n 20 | sed "s/^/          /"; FAIL=1
                 fi
+                # R14: greetd must start niri-session with the gdm-equivalent session variables,
+                # or logind records a tty session and Electron loses DesktopNames=niri;GNOME.
+                VITTA_LAUNCH=$(grep -F "backend.launch(" /usr/share/vitta/greeter/Auth.qml | sed "s/^[[:space:]]*//")
+                if [ "$VITTA_LAUNCH" = "auth.backend.launch([\"niri-session\"], [\"XDG_SESSION_TYPE=wayland\", \"XDG_SESSION_DESKTOP=niri\", \"XDG_CURRENT_DESKTOP=niri:GNOME\"], true);" ]; then
+                    echo "  ok    greeter launches niri-session with XDG_SESSION_TYPE/XDG_SESSION_DESKTOP/XDG_CURRENT_DESKTOP"
+                else
+                    echo "  FAIL  greeter launch call lacks the R14 session environment: ${VITTA_LAUNCH:-none}"; FAIL=1
+                fi
+                # Behavioural: drive ok/badpass/multiprompt/error through the preview backend
+                # headless (red status, cancellation, cleared + refocused password, launch env).
+                if VITTA_SELFTEST_LOG=$(vitta-greeter-preview --selftest 2>&1); then
+                    echo "  ok    greeter selftest: ok badpass multiprompt error"
+                else
+                    echo "  FAIL  greeter selftest:"; printf "%s\n" "$VITTA_SELFTEST_LOG" | grep -E "FAIL|FAILED|^    " | tail -n 30 | sed "s/^/          /"; FAIL=1
+                fi
             fi
             echo "Phase 0 bootstrap binaries:"
             for bin in pass gpg pinentry-curses age ssh git jq curl; do check_bin "$bin"; done
