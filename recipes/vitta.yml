@@ -1,0 +1,37 @@
+# vitta — personal niri desktop on Universal Blue's desktop-less base
+# Base: ublue-os/base-main (Fedora + ublue plumbing, no GNOME, no zfs, no
+# Bluefin layer). Pinned to a Fedora major instead of a floating stream so a
+# Fedora flip is a deliberate one-line bump, pre-checked by the fedora-next CI
+# job (scripts/check-fedora-next.sh with RECIPES/BASE_IMAGE pointed here).
+#
+# Shares recipes/common.yml with bluefin-udx[-nvidia]. Vitta-only modules
+# (files/vitta overlay, desktop plumbing Bluefin used to supply) arrive in
+# recipes/vitta-modules.yml. Published only as :testing — never :stable.
+
+name: vitta
+description: Vitta — personal niri desktop on Universal Blue base-main
+base-image: ghcr.io/ublue-os/base-main
+image-version: 44
+
+modules:
+  - type: files
+    files:
+      - source: system
+        destination: /
+  - from-file: common.yml
+
+  # Identity. The module follows the /etc/os-release symlink, so this rewrites
+  # /usr/lib/os-release too (what ostree/bootc read for boot entries). Values
+  # are written double-quoted (ID="vitta"), which os-release(5) permits.
+  # ID_LIKE keeps Fedora-family detection (dnf tooling, distro probes) working
+  # once ID stops being "fedora" — the same thing Bluefin does (ID=bluefin,
+  # ID_LIKE="fedora"). Keep this module last: earlier modules and their
+  # scripts then still see the stock Fedora identity.
+  - type: os-release
+    properties:
+      ID: vitta
+      ID_LIKE: fedora
+      NAME: "Vitta"
+      PRETTY_NAME: "Vitta 44"
+      VARIANT_ID: vitta
+      IMAGE_ID: vitta

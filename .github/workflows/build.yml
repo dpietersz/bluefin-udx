@@ -54,6 +54,16 @@ jobs:
           ENGINE: sudo podman
         run: scripts/check-fedora-next.sh
 
+      # Vitta sits on base-main (no Bluefin layer) at a pinned Fedora major, so
+      # it is resolved against base-main:<its major + 1>, not silverblue-main.
+      - name: Resolve Vitta packages on the next Fedora major
+        if: ${{ !cancelled() }}
+        env:
+          ENGINE: sudo podman
+          RECIPES: recipes/common.yml recipes/vitta.yml
+          BASE_IMAGE: ghcr.io/ublue-os/base-main
+        run: scripts/check-fedora-next.sh
+
   build:
     name: Build ${{ matrix.recipe }} (${{ matrix.stream }})
     runs-on: ubuntu-24.04
@@ -72,6 +82,15 @@ jobs:
         # upstream changes) before :stable does. Canary legs build and run the
         # full smoke gate but NEVER push. Skipped on PRs to keep PR runs fast.
         stream: ${{ fromJSON(github.event_name == 'pull_request' && '["stable"]' || '["stable", "latest"]') }}
+        # Vitta is a standalone leg, NOT crossed with the streams above: its
+        # recipe pins base-main to a Fedora major, so there is no :latest canary
+        # to point at, and it publishes only as :testing (vitta:stable is
+        # promoted by hand after the T580 checklist). Runs on PRs too.
+        # Publishable streams are exactly stable + testing, and the floating tag
+        # pushed equals the stream name — see the push/sign step conditions.
+        include:
+          - recipe: vitta
+            stream: testing
 
     steps:
       - name: Checkout
@@ -409,6 +428,45 @@ jobs:
                 exit 1
             fi
             echo "  ok    rpmdb readable ($(rpm -qa | wc -l) packages)"
+            # Vitta = base-main + common.yml, no Bluefin layer. Assertions that
+            # only hold because bluefin-dx supplied something are gated on this.
+            RECIPE_NAME="${{ matrix.recipe }}"
+            if [ "$RECIPE_NAME" = "vitta" ]; then
+                echo "Vitta identity:"
+                # Parse, do not grep a fixed spelling: the BlueBuild os-release
+                # module writes every value double-quoted (ID="vitta"), which
+                # os-release(5) treats as identical to ID=vitta.
+                grep -E "^(ID|ID_LIKE|NAME|PRETTY_NAME|VARIANT_ID|IMAGE_ID)=" /etc/os-release | sed "s/^/  info  /"
+                for OS_RELEASE_FILE in /etc/os-release /usr/lib/os-release; do
+                    for OS_RELEASE_PAIR in ID=vitta ID_LIKE=fedora NAME=Vitta VARIANT_ID=vitta IMAGE_ID=vitta; do
+                        OS_RELEASE_KEY="${OS_RELEASE_PAIR%%=*}"
+                        OS_RELEASE_WANT="${OS_RELEASE_PAIR#*=}"
+                        OS_RELEASE_GOT=$(. "$OS_RELEASE_FILE" && printf %s "${!OS_RELEASE_KEY:-}" || true)
+                        if [ "$OS_RELEASE_GOT" = "$OS_RELEASE_WANT" ]; then
+                            echo "  ok    $OS_RELEASE_FILE $OS_RELEASE_KEY=$OS_RELEASE_GOT"
+                        else
+                            echo "  FAIL  $OS_RELEASE_FILE $OS_RELEASE_KEY=${OS_RELEASE_GOT:-unset}, expected $OS_RELEASE_WANT"
+                            FAIL=1
+                        fi
+                    done
+                done
+                echo "Vitta excluded packages:"
+                for p in gdm gnome-shell zfs incus uupd; do
+                    if rpm -q "$p" >/dev/null 2>&1; then
+                        echo "  FAIL  $p installed - Vitta must not ship it"
+                        FAIL=1
+                    else
+                        echo "  ok    $p not installed"
+                    fi
+                done
+                VITTA_FORBIDDEN=$(rpm -qa --qf "%{NAME}\n" | grep -E "^(gnome-session|cockpit|setroubleshoot|sysstat$)" || true)
+                if [ -n "$VITTA_FORBIDDEN" ]; then
+                    echo "  FAIL  forbidden package families installed: $(echo $VITTA_FORBIDDEN)"
+                    FAIL=1
+                else
+                    echo "  ok    no gnome-session* / cockpit* / setroubleshoot* / sysstat"
+                fi
+            fi
             echo "Phase 0 bootstrap binaries:"
             for bin in pass gpg pinentry-curses age ssh git jq curl; do check_bin "$bin"; done
             check_rpm pinentry
@@ -556,7 +614,16 @@ jobs:
             # :latest canary has none. Terra zed then installs plain zed-cli and there
             # is no zeditor. Dotfiles launch "zeditor", so losing zfs upstream (e.g. a
             # base without ublue akmods) changes the editor command - see MAINTENANCE.md.
-            if rpm -q zfs >/dev/null 2>&1; then
+            # Vitta has no zfs by design, so Terra resolves plain zed-cli; the
+            # zeditor name dotfiles launch is a Vitta overlay link (later task).
+            if [ "$RECIPE_NAME" = "vitta" ]; then
+                if rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zed-cli-"; then
+                    echo "  ok    /usr/bin/zed owned by Terra zed-cli (no zfs on Vitta)"
+                else
+                    echo "  FAIL  Vitta /usr/bin/zed not owned by Terra zed-cli"
+                    FAIL=1
+                fi
+            elif rpm -q zfs >/dev/null 2>&1; then
                 check_bin zeditor
                 if rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zfs-"; then
                     echo "  ok    /usr/bin/zed owned by zfs (editor is zeditor)"
@@ -668,7 +735,13 @@ jobs:
             check_bin v4l2-ctl
             check_rpm mediainfo
             check_bin mediainfo
-            check_rpm kmod-v4l2loopback
+            # bluefin-dx ships the ublue-signed kmod; base-main does not. Vitta
+            # adds it via the akmods module in vitta-modules.yml (later task).
+            if [ "$RECIPE_NAME" = "vitta" ]; then
+                echo "  skip  kmod-v4l2loopback (not yet added to Vitta)"
+            else
+                check_rpm kmod-v4l2loopback
+            fi
             check_file /etc/modules-load.d/v4l2loopback.conf
             check_file /etc/modprobe.d/v4l2loopback.conf
             if ! grep -q "video_nr=10" /etc/modprobe.d/v4l2loopback.conf; then
@@ -764,7 +837,7 @@ jobs:
       # version chasing.
       - name: Log in to ghcr + lowercase registry
         id: regcase
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && matrix.stream == 'stable'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (matrix.stream == 'stable' || matrix.stream == 'testing')
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
@@ -789,7 +862,7 @@ jobs:
           echo "lowercase=${LOWER}" >> "$GITHUB_OUTPUT"
 
       - name: Tag and push to ghcr
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && matrix.stream == 'stable'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (matrix.stream == 'stable' || matrix.stream == 'testing')
         id: push
         env:
           REGISTRY_AUTH_FILE: /tmp/auth.json
@@ -798,13 +871,20 @@ jobs:
           SRC="${{ steps.smoke.outputs.image }}"
           REG="${{ steps.regcase.outputs.lowercase }}"
           NAME="${{ matrix.recipe }}"
+          # Floating tag = stream: bluefin recipes publish :stable, vitta
+          # publishes :testing and must never reach :stable from CI.
+          FLOAT_TAG="${{ matrix.stream }}"
+          case "${NAME}:${FLOAT_TAG}" in
+            bluefin-udx:stable|bluefin-udx-nvidia:stable|vitta:testing) ;;
+            *) echo "::error::refusing to push ${NAME}:${FLOAT_TAG}"; exit 1 ;;
+          esac
           DATE_TAG="$(date -u +%Y%m%d)"
           SHA_TAG="${GITHUB_SHA::7}"
 
-          # Always push :stable + a dated tag + a sha tag (rollback targets).
-          # sudo -E preserves REGISTRY_AUTH_FILE so rootful podman push
-          # finds the credentials written by `sudo podman login` above.
-          for TAG in stable "$DATE_TAG" "$SHA_TAG"; do
+          # Always push the floating tag + a dated tag + a sha tag (rollback
+          # targets). sudo -E preserves REGISTRY_AUTH_FILE so rootful podman
+          # push finds the credentials written by `sudo podman login` above.
+          for TAG in "$FLOAT_TAG" "$DATE_TAG" "$SHA_TAG"; do
             DEST="${REG}/${NAME}:${TAG}"
             sudo podman tag "$SRC" "$DEST"
             sudo -E podman push "$DEST"
@@ -812,7 +892,7 @@ jobs:
           done
 
           # Capture the digest that consumers (rpm-ostree) actually pull when
-          # resolving :stable. ghcr wraps `podman push` results in an OCI
+          # resolving the floating tag. ghcr wraps `podman push` results in an OCI
           # image index, so the inner manifest digest reported by
           # `podman inspect ... RepoDigests` is NOT the digest the tag floats
           # to — the index digest is. Signing the inner manifest produced
@@ -820,16 +900,16 @@ jobs:
           # rejected with "A signature was required, but no signature
           # exists"). skopeo inspect docker://… resolves the tag against
           # the registry and returns the canonical digest cosign should sign.
-          DIGEST=$(skopeo inspect "docker://${REG}/${NAME}:stable" --format '{{.Digest}}')
+          DIGEST=$(skopeo inspect "docker://${REG}/${NAME}:${FLOAT_TAG}" --format '{{.Digest}}')
           echo "image_ref=${REG}/${NAME}@${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "Will sign: ${REG}/${NAME}@${DIGEST}"
 
       - name: Install cosign
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && matrix.stream == 'stable'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (matrix.stream == 'stable' || matrix.stream == 'testing')
         uses: sigstore/cosign-installer@v3.10.0
 
       - name: Sign image
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && matrix.stream == 'stable'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (matrix.stream == 'stable' || matrix.stream == 'testing')
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
           COSIGN_PASSWORD: ""
