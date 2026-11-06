@@ -188,6 +188,7 @@ jobs:
         uses: ./.github/actions/pin-podman
 
       - name: Test Vitta group reconciliation
+        if: matrix.recipe == 'vitta'
         run: sudo bash tests/test_vitta_groups.sh
 
       # ----------------------------------------------------------------------
@@ -513,8 +514,11 @@ jobs:
                     FAIL=1
                 fi
                 # Offline query of unit symlinks/presets; needs no running systemd.
+                # The libvirt sockets come from Fedora presets applied in the libvirt %post;
+                # the Windows work VM needs them, so assert rather than trust the preset.
                 for VITTA_UNIT in vitta-groups.service vitta-libvirt-relabel.service tailscaled.service docker.socket \
-                                  brew-setup.service brew-update.timer brew-upgrade.timer tuned.service tuned-ppd.service; do
+                                  brew-setup.service brew-update.timer brew-upgrade.timer tuned.service tuned-ppd.service \
+                                  virtqemud.socket virtnetworkd.socket virtstoraged.socket; do
                     VITTA_UNIT_STATE=$(systemctl is-enabled "$VITTA_UNIT" 2>/dev/null || true)
                     if [ "$VITTA_UNIT_STATE" = enabled ]; then
                         echo "  ok    $VITTA_UNIT enabled"
@@ -596,6 +600,8 @@ jobs:
                         echo "  FAIL  /etc/pam.d/greetd lacks: $VITTA_PAM"; FAIL=1
                     fi
                 done
+                # substack, not include: an included pam_unix "sufficient" would end the stack before the keyring line.
+                if grep -Eq "^password[[:space:]]+substack[[:space:]]+system-auth[[:space:]]*$" /etc/pam.d/greetd 2>/dev/null; then echo "  ok    pam.d/greetd: password substack system-auth"; else echo "  FAIL  /etc/pam.d/greetd must use password substack system-auth"; FAIL=1; fi
                 if rpm -V greetd 2>/dev/null | grep -q "/etc/pam.d/greetd-greeter"; then echo "  FAIL  /etc/pam.d/greetd-greeter differs from the greetd package"; FAIL=1; else echo "  ok    /etc/pam.d/greetd-greeter as packaged"; fi
                 VITTA_DAY=$(vitta-theme mode --at 2026-06-21T12:00+02:00 2>/dev/null || true)
                 VITTA_NIGHT=$(vitta-theme mode --at 2026-06-21T00:30+02:00 2>/dev/null || true)
@@ -604,6 +610,8 @@ jobs:
                 # ostree populates /var only on first deploy; a rebased machine needs tmpfiles.
                 if grep -Eqs "^d[[:space:]]+/var/lib/greetd[[:space:]]" /usr/lib/tmpfiles.d/*.conf; then echo "  ok    /var/lib/greetd created by tmpfiles.d"; else echo "  FAIL  no tmpfiles.d d-line creates /var/lib/greetd"; FAIL=1; fi
                 if [ -x /usr/libexec/vitta/vitta-greeter ]; then echo "  ok    /usr/libexec/vitta/vitta-greeter executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greeter missing or not executable"; FAIL=1; fi
+                # -m last: one output only; the default -m extend centres the card across a docked layout.
+                if grep -Eq "^exec cage -s -m last -- quickshell " /usr/libexec/vitta/vitta-greeter 2>/dev/null; then echo "  ok    vitta-greeter runs cage -s -m last"; else echo "  FAIL  vitta-greeter must exec cage -s -m last (single output when docked)"; FAIL=1; fi
                 if VITTA_QS_VERSION=$(quickshell --version 2>&1); then echo "  ok    $VITTA_QS_VERSION"; else echo "  FAIL  quickshell --version: $VITTA_QS_VERSION"; FAIL=1; fi
                 # Behavioural: load the production greeter QML headless. Catches QML type and
                 # reference errors that would otherwise surface only as a black screen at boot.
@@ -630,6 +638,12 @@ jobs:
                 else
                     echo "  FAIL  greeter selftest:"; printf "%s\n" "$VITTA_SELFTEST_LOG" | grep -E "FAIL|FAILED|^    " | tail -n 30 | sed "s/^/          /"; FAIL=1
                 fi
+                # Rebase simulation (an existing /var never gets the greetd %post output): tmpfiles
+                # alone must recreate the greetd xdg-desktop-portal mask for the greeter session.
+                rm -rf /var/lib/greetd/.config
+                systemd-tmpfiles --create --prefix=/var/lib/greetd >/dev/null 2>&1 || true
+                VITTA_PORTAL_MASK=$(readlink /var/lib/greetd/.config/systemd/user/xdg-desktop-portal.service 2>/dev/null || true)
+                if [ "$VITTA_PORTAL_MASK" = /dev/null ]; then echo "  ok    tmpfiles.d recreates the greeter xdg-desktop-portal mask"; else echo "  FAIL  greeter xdg-desktop-portal mask not recreated by tmpfiles.d (got: ${VITTA_PORTAL_MASK:-nothing})"; FAIL=1; fi
             fi
             echo "Phase 0 bootstrap binaries:"
             for bin in pass gpg pinentry-curses age ssh git jq curl; do check_bin "$bin"; done
