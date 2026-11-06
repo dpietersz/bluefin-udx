@@ -13,3 +13,5 @@ cosign.password
 /.bluebuild-scripts_*
 files/scripts/build-pins.env
 .claude/
+__pycache__/
+*.pyc
