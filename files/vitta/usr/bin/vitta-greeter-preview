@@ -1,0 +1,49 @@
+#!/bin/bash
+# vitta-greeter-preview — run the real greeter QML in a normal window with a
+# fake greetd backend, for checking looks and the login state machine without
+# logging out. Nothing is authenticated, launched or powered off.
+#
+# Usage: vitta-greeter-preview [--mode light|dark] [--scenario ok|badpass|multiprompt|error]
+#   --mode      pin the palette (default: whatever `vitta-theme mode` says)
+#   --scenario  fake greetd behaviour (default: ok)
+# VITTA_ROOT=<dir> runs the QML from <dir>/usr/share/vitta/greeter instead of
+# the installed copy, e.g. VITTA_ROOT=$PWD/files/vitta from the repo.
+set -euo pipefail
+
+usage() {
+    sed -n "6,10p" "$0" | sed "s/^# \{0,1\}//"
+    exit "${1:-0}"
+}
+
+MODE=""
+SCENARIO=ok
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --mode) MODE="${2:-}"; shift 2 ;;
+        --scenario) SCENARIO="${2:-}"; shift 2 ;;
+        -h|--help) usage 0 ;;
+        *) echo "vitta-greeter-preview: unknown argument: $1" >&2; usage 2 ;;
+    esac
+done
+case "$MODE" in ""|light|dark) ;; *) echo "vitta-greeter-preview: --mode must be light or dark" >&2; exit 2 ;; esac
+case "$SCENARIO" in ok|badpass|multiprompt|error) ;; *) echo "vitta-greeter-preview: unknown scenario: $SCENARIO" >&2; exit 2 ;; esac
+
+SHELL_QML="${VITTA_ROOT:-}/usr/share/vitta/greeter/shell.qml"
+if [ ! -f "$SHELL_QML" ]; then
+    echo "vitta-greeter-preview: $SHELL_QML not found" >&2
+    exit 1
+fi
+
+# Throwaway state dir, seeded with the current user, so the preview never
+# reads or writes greetd's /var/lib/greetd/vitta-last-user.
+STATE_DIR=$(mktemp -d -t vitta-greeter-preview.XXXXXX)
+trap 'rm -rf "$STATE_DIR"' EXIT
+printf "%s\n" "${USER:-$(id -un)}" > "$STATE_DIR/vitta-last-user"
+
+# Never let the preview reach a real greetd socket.
+env -u GREETD_SOCK \
+    VITTA_GREETER_PREVIEW=1 \
+    VITTA_GREETER_SCENARIO="$SCENARIO" \
+    VITTA_GREETER_MODE="$MODE" \
+    VITTA_GREETER_STATE_DIR="$STATE_DIR" \
+    quickshell -p "$SHELL_QML"

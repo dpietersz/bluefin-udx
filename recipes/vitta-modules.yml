@@ -12,7 +12,7 @@
 #                                 rpm-ostree resolves `code`.
 #   2. rpm-ostree / akmods / brew — package payload.
 #   3. full files/vitta overlay — AFTER every package module, so overlay files
-#                                 (later: greetd config, PAM) deterministically
+#                                 (greetd config + PAM) deterministically
 #                                 replace package defaults; also restores the
 #                                 shared baked keys akmods' rpmfusion
 #                                 install/uninstall deletes.
@@ -78,6 +78,12 @@ modules:
       - swtpm
       - edk2-ovmf
       - tailscale
+      # Login screen: greetd -> cage (kiosk compositor) -> Quickshell QML
+      # greeter (files/vitta/usr/share/vitta/greeter). The overlay below
+      # replaces the package's /etc/greetd/config.toml and /etc/pam.d/greetd.
+      - greetd
+      - cage
+      - quickshell
     # install + remove in one module = one `rpm-ostree override remove ...
     # --install=...` transaction, which is what lets tuned-ppd replace ppd:
     remove:
@@ -128,3 +134,6 @@ modules:
         - vitta-libvirt-relabel.service
         - tailscaled.service
         - docker.socket
+        # greetd.service carries Alias=display-manager.service, so enabling it
+        # also creates /etc/systemd/system/display-manager.service.
+        - greetd.service
