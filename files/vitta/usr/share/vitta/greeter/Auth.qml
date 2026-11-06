@@ -129,7 +129,9 @@ Scope {
         function onReadyToLaunch() {
             auth.rememberUser(auth.user);
             auth.starting();
-            auth.backend.launch(["niri-session"], [], true);
+            // gdm-equivalent session variables (R14): without them logind records
+            // a tty session and Electron misses niri.desktop's DesktopNames=niri;GNOME.
+            auth.backend.launch(["niri-session"], ["XDG_SESSION_TYPE=wayland", "XDG_SESSION_DESKTOP=niri", "XDG_CURRENT_DESKTOP=niri:GNOME"], true);
         }
     }
 
