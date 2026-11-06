@@ -8,10 +8,17 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from zoneinfo import ZoneInfo
 
+
+# Loading vitta-theme as a module would otherwise write
+# files/vitta/usr/bin/__pycache__/, which a local image build would bake into
+# /usr/bin. Subprocesses inherit the same guard through the environment.
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 ROOT = Path(__file__).resolve().parents[1]
 THEME = ROOT / "files/vitta/usr/bin/vitta-theme"
@@ -138,6 +145,12 @@ class VittaThemeTests(unittest.TestCase):
             "render", "hyprlock", "--mode", "dark",
             "--palette", str(PALETTE), "--logo-dir", "/logos",
         ).stdout
+        self.assertEqual(rendered.splitlines()[0], "# vitta-theme render hyprlock --mode dark")
+        light = run_cli(
+            "render", "hyprlock", "--mode", "light",
+            "--palette", str(PALETTE), "--logo-dir", "/logos",
+        ).stdout
+        self.assertEqual(light.splitlines()[0], "# vitta-theme render hyprlock --mode light")
         shapes = re.findall(r"shape \{\n(.*?)\n\}", rendered, re.DOTALL)
         self.assertEqual(len(shapes), 4)
         self.assertEqual(
@@ -164,7 +177,15 @@ class VittaThemeTests(unittest.TestCase):
         self.assertNotIn("general {", rendered)
         self.assertNotIn("auth {", rendered)
 
-    def test_render_hyprlock_keeps_content_inside_innermost_shape(self):
+    def render_boxes(self):
+        """Return (inner card half-extents, [(kind, x0, x1, y0, y1), ...]).
+
+        hyprlock centres each widget on its `position` (halign/valign center,
+        y up). Image and input boxes use their `size`. A label's box height is
+        estimated as 1.3 x its pixel size; hyprlock's font_size is Pango
+        points at 96 dpi (px = pt * 4/3). Label width is taken as the whole
+        inner card: every label is centred, so only vertical room matters.
+        """
         rendered = run_cli(
             "render", "hyprlock", "--mode", "dark",
             "--palette", str(PALETTE), "--logo-dir", "/logos",
@@ -176,23 +197,49 @@ class VittaThemeTests(unittest.TestCase):
         max_x = inner_width / 2 - 12
         max_y = inner_height / 2 - 12
 
-        for kind in ("image", "input-field"):
-            for block in re.findall(rf"{kind} \{{\n(.*?)\n\}}", rendered, re.DOTALL):
-                width, height = map(
-                    int, re.search(r"size = (\d+), (\d+)", block).groups()
-                )
+        boxes = []
+        for kind in ("image", "input-field", "label"):
+            for block in re.findall(rf"^{kind} \{{\n(.*?)\n\}}", rendered, re.DOTALL | re.MULTILINE):
                 x, y = map(int, re.search(r"position = (-?\d+), (-?\d+)", block).groups())
-                self.assertLessEqual(abs(x) + width / 2, max_x)
-                self.assertLessEqual(abs(y) + height / 2, max_y)
+                if kind == "label":
+                    font_px = int(re.search(r"font_size = (\d+)", block).group(1)) * 96 / 72
+                    width, height = 2 * max_x, font_px * 1.3
+                else:
+                    width, height = map(
+                        int, re.search(r"size = (\d+), (\d+)", block).groups()
+                    )
+                boxes.append((kind, x - width / 2, x + width / 2, y - height / 2, y + height / 2))
+        return (max_x, max_y), boxes
 
-        labels = re.findall(r"label \{\n(.*?)\n\}", rendered, re.DOTALL)
-        self.assertGreaterEqual(len(labels), 3)
-        for block in labels:
-            x, y = map(int, re.search(r"position = (-?\d+), (-?\d+)", block).groups())
-            font_size = int(re.search(r"font_size = (\d+)", block).group(1))
-            self.assertLessEqual(abs(x), max_x)
-            self.assertLessEqual(abs(y) + font_size * 1.3 / 2, max_y)
+    def test_render_hyprlock_keeps_content_inside_innermost_shape(self):
+        (max_x, max_y), boxes = self.render_boxes()
+        self.assertEqual([kind for kind, *_ in boxes].count("label"), 3)
+        self.assertEqual(len(boxes), 5)
+        for kind, x0, x1, y0, y1 in boxes:
+            self.assertLessEqual(max(abs(x0), abs(x1)), max_x, kind)
+            self.assertLessEqual(max(abs(y0), abs(y1)), max_y, kind)
 
+    def test_render_hyprlock_widgets_do_not_overlap(self):
+        _, boxes = self.render_boxes()
+        for index, first in enumerate(boxes):
+            for second in boxes[index + 1:]:
+                overlap_x = first[1] < second[2] and second[1] < first[2]
+                overlap_y = first[3] < second[4] and second[3] < first[4]
+                self.assertFalse(overlap_x and overlap_y, f"{first} overlaps {second}")
+
+    def test_render_hyprlock_matches_greeter_text(self):
+        rendered = run_cli(
+            "render", "hyprlock", "--mode", "dark",
+            "--palette", str(PALETTE), "--logo-dir", "/logos",
+        ).stdout
+        # Card.qml: 72 px clock, "dddd d MMMM yyyy" date, `host · vitta <version>`.
+        self.assertIn('date "+<b>%H:%M</b>"\n    color = rgba(ebdbb2ff)\n    font_size = 54\n', rendered)
+        self.assertIn('date "+%A %-d %B %Y"', rendered)
+        self.assertIn(
+            'echo "$(uname -n) · vitta $(. /etc/os-release; echo ${IMAGE_VERSION:-$VERSION_ID})"',
+            rendered,
+        )
+        self.assertNotIn("$HOSTNAME", rendered)
 
 if __name__ == "__main__":
     unittest.main()
