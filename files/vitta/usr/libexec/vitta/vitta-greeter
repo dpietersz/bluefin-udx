@@ -1,7 +1,9 @@
 #!/bin/bash
 # vitta-greeter — greetd's default_session (see /etc/greetd/config.toml).
 # Runs as the greetd user: cage gives the Quickshell greeter a fullscreen
-# Wayland output; -s keeps VT switching available for recovery.
+# Wayland output; -s keeps VT switching available for recovery. -m last puts
+# the greeter on one output only: the default (-m extend) spans every
+# connected monitor, which on a docked laptop centres the card on the seam.
 set -euo pipefail
 
 # greetd hands the greeter a minimal environment; Theme.qml resolves
@@ -15,4 +17,4 @@ export XDG_CONFIG_HOME="$GREETD_HOME/.config"
 export XDG_CACHE_HOME="$GREETD_HOME/.cache"
 export XDG_STATE_HOME="$GREETD_HOME/.local/state"
 
-exec cage -s -- quickshell -p /usr/share/vitta/greeter/shell.qml
+exec cage -s -m last -- quickshell -p /usr/share/vitta/greeter/shell.qml
