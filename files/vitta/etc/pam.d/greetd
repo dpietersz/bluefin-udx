@@ -9,7 +9,7 @@ account    required    pam_sepermit.so
 account    required    pam_nologin.so
 account    include     system-auth
 
-password   include     system-auth
+password   substack    system-auth
 # Vitta: keep the login keyring password in sync when the user changes it.
 -password   optional    pam_gnome_keyring.so use_authtok
 
