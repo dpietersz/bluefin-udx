@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-`bluefin-udx` is a personal [bootc](https://containers.github.io/bootc/) image built on top of `ghcr.io/ublue-os/bluefin-dx[-nvidia-open]`. Two variants ship from one shared module set:
+`bluefin-udx` is a personal [bootc](https://containers.github.io/bootc/) image repository. It builds two stable images on `ghcr.io/ublue-os/bluefin-dx[-nvidia-open]` plus Vitta, a testing niri desktop on desktop-less `ghcr.io/ublue-os/base-main:44`:
 
 - `bluefin-udx` — Intel/AMD (ThinkPad T580)
 - `bluefin-udx-nvidia` — NVIDIA open kernel (ThinkPad P14s Gen5)
+- `vitta` — T580-first replacement, published only as `ghcr.io/dpietersz/vitta:testing` until owner-approved acceptance and promotion
 
-Built nightly (04:20 UTC) and on push to `recipes/`, `scripts/`, `files/`, `cosign.pub`, or the workflow itself. Both variants are cosign-signed and pulled via `rpm-ostree rebase ostree-image-signed:docker://...`. The trust files (pubkey, registries.d snippet, policy.json merge script) are baked into the image so a fresh machine can rebase once `unverified` and immediately switch to `signed`.
+Built nightly (04:20 UTC) and on push to `recipes/`, `scripts/`, `files/`, `cosign.pub`, or the workflow itself. The images are cosign-signed and use the baked trust policy; Vitta CI pushes only `:testing`, date, and SHA tags—never `:stable`. Its Vitta-only modules and overlay live in `recipes/vitta-modules.yml` and `files/vitta/`.
 
 It is **NOT** a community distro. The package list is Dimitri's; forks are welcome but unsupported.
 
@@ -73,9 +74,11 @@ If a request is ambiguous about *where* a package belongs, walk the bake-criteri
 
 ```
 recipes/
-  common.yml              # Shared module set — both variants pull from this
+  common.yml              # Shared module set — every image pulls from this
   bluefin-udx.yml         # Intel/AMD entry point (base: bluefin-dx)
   bluefin-udx-nvidia.yml  # NVIDIA entry point (base: bluefin-dx-nvidia-open)
+  vitta.yml               # Vitta entry point (base: base-main:44)
+  vitta-modules.yml       # Vitta-only desktop plumbing and module order
 files/
   scripts/                # Inline bluebuild scripts (teams-wayland-patch, install-cosign-policy)
   system/                 # Overlay copied to image root via the `files` module
@@ -84,8 +87,12 @@ files/
     usr/lib/environment.d/50-electron-keyring.conf  # Forces :GNOME into XDG_CURRENT_DESKTOP for Electron keyring detection
     usr/lib/pki/containers/{bluefin-udx,bluefin-udx-nvidia}.pub  # cosign pubkeys baked into image
     usr/share/wayland-sessions/niri.desktop      # Override DesktopNames=niri → niri;GNOME for Electron password-store detection
+  vitta/                  # Vitta-only overlay (greeter, theme, repos, services)
 scripts/
   local-build-test.sh     # Local mirror of the CI smoke-boot gate (Phase checks live in here)
+  check-fedora-next.sh    # Resolves bluefin and Vitta recipe sets via RECIPES/BASE_IMAGE env
+  vitta-gap-report.sh     # Compares Bluefin DX and base-main package/integration-file gaps
+tests/                    # Regression tests, including Vitta theme and group reconciliation
 cosign.pub                # Public key matching cosign.key (cosign.key is the signing secret, gitignored in spirit)
 .github/workflows/build.yml   # Nightly + on-push build/sign/push pipeline
 ```
@@ -96,6 +103,7 @@ cosign.pub                # Public key matching cosign.key (cosign.key is the si
 # Local build + smoke-boot of a recipe (mirrors CI gate exactly)
 ./scripts/local-build-test.sh bluefin-udx
 ./scripts/local-build-test.sh bluefin-udx-nvidia
+./scripts/local-build-test.sh vitta
 
 # Bootstrap bluebuild CLI without brew (matches README/CI installer pattern)
 CID=$(podman create ghcr.io/blue-build/cli:latest-installer /bin/true)
@@ -106,6 +114,8 @@ podman rm "$CID"
 # (auto-detects N+1 from bluefin-dx:stable; also runs nightly in CI)
 ./scripts/check-fedora-next.sh
 ./scripts/check-fedora-next.sh 45
+RECIPES="recipes/common.yml recipes/vitta.yml recipes/vitta-modules.yml" \
+  BASE_IMAGE=ghcr.io/ublue-os/base-main ./scripts/check-fedora-next.sh
 
 # Verify a signed image manually (cosign.pub is the same key baked at /usr/lib/pki/containers/)
 cosign verify --key cosign.pub ghcr.io/dpietersz/bluefin-udx-nvidia:stable
@@ -115,7 +125,7 @@ rpm-ostree status
 sudo rpm-ostree rollback
 ```
 
-There are **no unit tests**. Validation is the build gate + the smoke-boot. The `local-build-test.sh` Phase 0 / Phase 2 / Phase 3a/b/c / Phase 4 checks must stay in sync with `recipes/common.yml` — when you add a package there, add the corresponding `check_rpm` / `check_bin` line in the script.
+Validation is the regression tests plus the build gate and smoke-boot. Run focused tests in `tests/` when changing their owner; `tests/test_vitta_groups.sh` covers the every-wheel-user reconciliation. The `local-build-test.sh` checks must stay in sync with `recipes/common.yml` and `recipes/vitta-modules.yml` — when you add a package, add the corresponding `check_rpm` / `check_bin` line in the applicable smoke gate.
 
 ## When making changes
 

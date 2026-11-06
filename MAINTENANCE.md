@@ -114,6 +114,14 @@ Check monthly-ish, not only quarterly — subscribe to https://docs.projectbluef
 - [ ] **Maintainer pulse.** Non-Renovate commits to `ublue-os/bluefin` in the last 60 days, open-issue response, blog posts mentioning Classic. Silence is the earliest signal that a fallback base decision is due.
 - [ ] Is `bluefin-dx:stable` still the right channel? If you've been on `:latest` mentally but `:stable` in recipe, reconcile.
 
+Vitta remains `:testing` until the T580 acceptance checklist is complete. **Once the owner promotes Vitta to `:stable`, the Vitta/base-main checks below replace this Bluefin-Classic watch for the T580**; retain the Bluefin checks while either bluefin-udx image still uses that upstream base.
+
+**Vitta / `base-main` health (quarterly after promotion; useful while testing):**
+- [ ] Check `ghcr.io/ublue-os/base-main:44` freshness and its Fedora-major cadence with `skopeo inspect --no-tags docker://ghcr.io/ublue-os/base-main:44`; keep Vitta pinned to an intentional major and run the Vitta leg of `scripts/check-fedora-next.sh` before changing it.
+- [ ] On Vitta, record `rpm -q greetd cage quickshell` and run the image smoke gate or `vitta-greeter-preview --selftest`; investigate Fedora updates that change the login-stack versions or break the headless greeter check.
+- [ ] Verify the baked VS Code signing key still hashes to `2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6` (`sha256sum /etc/pki/rpm-gpg/microsoft.asc`) and that `files/vitta/etc/yum.repos.d/vscode.repo` still resolves `code` with GPG checking enabled.
+- [ ] Verify the Docker CE and Tailscale Fedora repositories still return signed metadata and resolve their Vitta package sets; do not replace their package-managed keys or repositories with unpinned downloads.
+
 ### 9. macOS reality check
 - [ ] Did anything in `dotfiles/.chezmoiscripts/run_once_before_01b-install-homebrew-packages.sh.tmpl` need a corresponding Linux update that didn't land?
 - [ ] Goal: macOS and Linux deliver the same developer experience modulo OS-specific apps.
