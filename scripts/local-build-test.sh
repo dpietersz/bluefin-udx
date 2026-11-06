@@ -130,6 +130,12 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
         else
             echo "  ok    no qemu-user-static* / non-x86 qemu-system-*"
         fi
+        if rpm -q power-profiles-daemon >/dev/null 2>&1; then
+            echo "  FAIL  power-profiles-daemon installed - tuned-ppd must own ppd-service"
+            FAIL=1
+        else
+            echo "  ok    power-profiles-daemon replaced by tuned-ppd"
+        fi
         check_file /etc/yum.repos.d/vscode.repo
         VSCODE_KEY_SHA256=$(sha256sum /etc/pki/rpm-gpg/microsoft.asc 2>/dev/null | cut -d " " -f 1)
         if [ "$VSCODE_KEY_SHA256" = "2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6" ]; then
@@ -140,7 +146,7 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
         fi
         # Offline query of unit symlinks/presets; needs no running systemd.
         for VITTA_UNIT in vitta-groups.service vitta-libvirt-relabel.service tailscaled.service docker.socket \
-                          brew-setup.service brew-update.timer brew-upgrade.timer; do
+                          brew-setup.service brew-update.timer brew-upgrade.timer tuned.service tuned-ppd.service; do
             VITTA_UNIT_STATE=$(systemctl is-enabled "$VITTA_UNIT" 2>/dev/null || true)
             if [ "$VITTA_UNIT_STATE" = enabled ]; then
                 echo "  ok    $VITTA_UNIT enabled"

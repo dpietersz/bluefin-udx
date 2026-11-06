@@ -18,11 +18,11 @@
 #   scripts/check-fedora-next.sh            # next major after bluefin-dx:stable
 #   scripts/check-fedora-next.sh 45         # explicit Fedora major
 #   BASE_IMAGE=quay.io/fedora/fedora scripts/check-fedora-next.sh 45
-#   RECIPES="recipes/common.yml recipes/vitta.yml" \
+#   RECIPES="recipes/common.yml recipes/vitta.yml recipes/vitta-modules.yml" \
 #     BASE_IMAGE=ghcr.io/ublue-os/base-main scripts/check-fedora-next.sh
 #
 # Environment:
-#   RECIPES     space-separated recipe files whose rpm-ostree modules are
+#   RECIPES     space-separated recipe files whose rpm-ostree and files modules are
 #               resolved. from-file includes are NOT followed, so list the
 #               shared module file too. Default: common.yml + both bluefin-udx.
 #   BASE_IMAGE  image resolved against, tagged :<major>.
@@ -97,8 +97,34 @@ if [ "${#PKGS[@]}" -eq 0 ]; then
   exit 2
 fi
 
+# Baked .repo files and keys come from the recipes' `files` modules, not from
+# a fixed overlay: bluefin-udx copies files/system to /, Vitta additionally
+# copies files/vitta (whose VS Code repo has to exist for `code` to resolve).
+# Each entry is either a whole overlay mirrored at / or a directory copied
+# straight into /etc/yum.repos.d or /etc/pki/rpm-gpg.
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+mkdir -p "$STAGE/repos" "$STAGE/keys"
+while IFS=$'\t' read -r src dest; do
+  dest="/${dest#/}"
+  dest="${dest%/}"
+  case "$dest" in
+    "") repo_dir="files/$src/etc/yum.repos.d"; key_dir="files/$src/etc/pki/rpm-gpg" ;;
+    /etc/yum.repos.d) repo_dir="files/$src"; key_dir="" ;;
+    /etc/pki/rpm-gpg) repo_dir=""; key_dir="files/$src" ;;
+    *) continue ;;
+  esac
+  if [ -n "$repo_dir" ] && [ -d "$repo_dir" ]; then
+    find "$repo_dir" -maxdepth 1 -name '*.repo' -exec cp -t "$STAGE/repos" {} +
+  fi
+  if [ -n "$key_dir" ] && [ -d "$key_dir" ]; then
+    find "$key_dir" -maxdepth 1 -type f -exec cp -t "$STAGE/keys" {} +
+  fi
+done < <(yq -r '.modules[] | select(.type == "files") | .files[] | [.source, .destination] | @tsv' "${RECIPE_FILES[@]}" | grep -vx -- "---")
+
 echo "==> Fedora ${FEDORA} resolution check against ${IMAGE}"
 echo "    ${#PKGS[@]} packages, ${#REPO_URLS[@]} remote .repo files, ${#KEY_URLS[@]} remote keys"
+echo "    baked: $(cd "$STAGE/repos" && ls | tr '\n' ' ')"
 
 # No N+1 base yet (e.g. right after a Fedora flip) is a normal state, not a
 # failure: there is simply nothing to check against.
@@ -118,8 +144,8 @@ if [ "$(basename "${ENGINE_CMD[-1]}")" = docker ]; then PULL=always; else PULL=n
 # judged on the solver output, not the exit code.
 set +e
 OUTPUT=$("${ENGINE_CMD[@]}" run --rm --pull="$PULL" \
-  -v "$PWD/files/system/etc/yum.repos.d:/in/repos:ro,z" \
-  -v "$PWD/files/system/etc/pki/rpm-gpg:/in/keys:ro,z" \
+  -v "$STAGE/repos:/in/repos:ro,z" \
+  -v "$STAGE/keys:/in/keys:ro,z" \
   -e REPO_URLS="${REPO_URLS[*]}" \
   -e KEY_URLS="${KEY_URLS[*]}" \
   -e PKGS="${PKGS[*]}" \

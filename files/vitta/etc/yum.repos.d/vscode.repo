@@ -1,0 +1,22 @@
+# Visual Studio Code (Microsoft) — Vitta only.
+# Microsoft publishes no .repo file; this is the repo definition from their
+# Linux install docs, with gpgkey pointing at the baked key below so the image
+# build never depends on packages.microsoft.com/keys being reachable.
+#
+# Applied BEFORE the rpm-ostree module (recipes/vitta-modules.yml, first files
+# module) so `code` resolves; the later full files/vitta overlay re-copies it.
+#
+# microsoft.asc — fetched 2026-11-06 from https://packages.microsoft.com/keys/microsoft.asc
+#   Fingerprint: BC52 8686 B50D 79E3 39D3  721C EB3E 94AD BE12 29CF
+#   UID:         Microsoft (Release signing) <gpgsecurity@microsoft.com>
+#   SHA-256:     2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6
+
+[code]
+name=Visual Studio Code
+baseurl=https://packages.microsoft.com/yumrepos/vscode
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/microsoft.asc
+# Only VS Code itself: the same Microsoft repo also carries insiders/other builds.
+includepkgs=code
+metadata_expire=4h
