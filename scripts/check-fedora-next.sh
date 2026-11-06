@@ -18,6 +18,20 @@
 #   scripts/check-fedora-next.sh            # next major after bluefin-dx:stable
 #   scripts/check-fedora-next.sh 45         # explicit Fedora major
 #   BASE_IMAGE=quay.io/fedora/fedora scripts/check-fedora-next.sh 45
+#   RECIPES="recipes/common.yml recipes/vitta.yml" \
+#     BASE_IMAGE=ghcr.io/ublue-os/base-main scripts/check-fedora-next.sh
+#
+# Environment:
+#   RECIPES     space-separated recipe files whose rpm-ostree modules are
+#               resolved. from-file includes are NOT followed, so list the
+#               shared module file too. Default: common.yml + both bluefin-udx.
+#   BASE_IMAGE  image resolved against, tagged :<major>.
+#               Default: ghcr.io/ublue-os/silverblue-main.
+#   ENGINE      container engine command, may carry a prefix ("sudo podman").
+#
+# Without an explicit major, N+1 is derived from the first recipe that pins a
+# numeric image-version (vitta.yml: 44 -> 45); recipes on a floating stream
+# (bluefin-udx: stable) fall back to bluefin-dx:stable's Fedora major.
 #
 # Exit codes: 0 = all packages resolve (or no N+1 base published yet),
 #             1 = resolution failed, 2 = usage/setup error.
@@ -27,6 +41,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BASE_IMAGE="${BASE_IMAGE:-ghcr.io/ublue-os/silverblue-main}"
+read -r -a RECIPE_FILES <<< "${RECIPES:-recipes/common.yml recipes/bluefin-udx.yml recipes/bluefin-udx-nvidia.yml}"
 # ENGINE may carry a prefix, e.g. ENGINE="sudo podman" in CI.
 read -r -a ENGINE_CMD <<< "${ENGINE:-podman}"
 
@@ -37,8 +52,23 @@ for tool in "${ENGINE_CMD[@]: -1}" yq skopeo jq; do
   fi
 done
 
+if [ "${#RECIPE_FILES[@]}" -eq 0 ]; then
+  echo "ERROR: RECIPES is empty" >&2
+  exit 2
+fi
+for recipe in "${RECIPE_FILES[@]}"; do
+  if [ ! -f "$recipe" ]; then
+    echo "ERROR: recipe $recipe not found" >&2
+    exit 2
+  fi
+done
+
+PINNED=$(yq -r '.["image-version"] // ""' "${RECIPE_FILES[@]}" | grep -E '^[0-9]+$' | head -n1 || true)
+
 if [ $# -ge 1 ]; then
   FEDORA="$1"
+elif [ -n "$PINNED" ]; then
+  FEDORA=$((PINNED + 1))
 else
   CURRENT=$(skopeo inspect --no-tags docker://ghcr.io/ublue-os/bluefin-dx:stable \
     | jq -r '.Labels["org.opencontainers.image.version"]' | cut -d. -f1)
@@ -54,17 +84,16 @@ if [[ ! "$FEDORA" =~ ^[0-9]+$ ]]; then
 fi
 
 IMAGE="${BASE_IMAGE}:${FEDORA}"
-RECIPES=(recipes/common.yml recipes/bluefin-udx.yml recipes/bluefin-udx-nvidia.yml)
 
 # Same selectors bluebuild's rpm-ostree module consumes. Comments are stripped
 # by yq; %OS_VERSION% is bluebuild's substitution token.
-mapfile -t PKGS < <(yq -r '.modules[] | select(.type == "rpm-ostree") | .install[]?' "${RECIPES[@]}" | grep -vx -- "---" | sort -u)
-mapfile -t REPO_URLS < <(yq -r '.modules[] | select(.type == "rpm-ostree") | .repos[]?' "${RECIPES[@]}" | grep -vx -- "---" \
+mapfile -t PKGS < <(yq -r '.modules[] | select(.type == "rpm-ostree") | .install[]?' "${RECIPE_FILES[@]}" | grep -vx -- "---" | sort -u)
+mapfile -t REPO_URLS < <(yq -r '.modules[] | select(.type == "rpm-ostree") | .repos[]?' "${RECIPE_FILES[@]}" | grep -vx -- "---" \
   | sed "s/%OS_VERSION%/${FEDORA}/g" | sort -u)
-mapfile -t KEY_URLS < <(yq -r '.modules[] | select(.type == "rpm-ostree") | .keys[]?' "${RECIPES[@]}" | grep -vx -- "---" | sort -u)
+mapfile -t KEY_URLS < <(yq -r '.modules[] | select(.type == "rpm-ostree") | .keys[]?' "${RECIPE_FILES[@]}" | grep -vx -- "---" | sort -u)
 
 if [ "${#PKGS[@]}" -eq 0 ]; then
-  echo "ERROR: no packages parsed from ${RECIPES[*]}" >&2
+  echo "ERROR: no packages parsed from ${RECIPE_FILES[*]}" >&2
   exit 2
 fi
 

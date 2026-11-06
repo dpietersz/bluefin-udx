@@ -6,6 +6,7 @@
 # Usage:
 #   ./scripts/local-build-test.sh                  # builds bluefin-udx
 #   ./scripts/local-build-test.sh bluefin-udx-nvidia
+#   ./scripts/local-build-test.sh vitta
 
 set -euo pipefail
 
@@ -69,6 +70,44 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
         if [ "$RPM_VENDOR" = "$2" ]; then echo "  ok    $1 vendor: $RPM_VENDOR"; else echo "  FAIL  $1 vendor: ${RPM_VENDOR:-missing}, expected $2"; FAIL=1; fi
     }
 
+    # Vitta = base-main + common.yml, no Bluefin layer. Assertions that
+    # only hold because bluefin-dx supplied something are gated on this.
+    if [ "$RECIPE_NAME" = "vitta" ]; then
+        echo "Vitta identity:"
+        # Parse, do not grep a fixed spelling: the BlueBuild os-release
+        # module writes every value double-quoted (ID="vitta"), which
+        # os-release(5) treats as identical to ID=vitta.
+        grep -E "^(ID|ID_LIKE|NAME|PRETTY_NAME|VARIANT_ID|IMAGE_ID)=" /etc/os-release | sed "s/^/  info  /"
+        for OS_RELEASE_FILE in /etc/os-release /usr/lib/os-release; do
+            for OS_RELEASE_PAIR in ID=vitta ID_LIKE=fedora NAME=Vitta VARIANT_ID=vitta IMAGE_ID=vitta; do
+                OS_RELEASE_KEY="${OS_RELEASE_PAIR%%=*}"
+                OS_RELEASE_WANT="${OS_RELEASE_PAIR#*=}"
+                OS_RELEASE_GOT=$(. "$OS_RELEASE_FILE" && printf %s "${!OS_RELEASE_KEY:-}" || true)
+                if [ "$OS_RELEASE_GOT" = "$OS_RELEASE_WANT" ]; then
+                    echo "  ok    $OS_RELEASE_FILE $OS_RELEASE_KEY=$OS_RELEASE_GOT"
+                else
+                    echo "  FAIL  $OS_RELEASE_FILE $OS_RELEASE_KEY=${OS_RELEASE_GOT:-unset}, expected $OS_RELEASE_WANT"
+                    FAIL=1
+                fi
+            done
+        done
+        echo "Vitta excluded packages:"
+        for p in gdm gnome-shell zfs incus uupd; do
+            if rpm -q "$p" >/dev/null 2>&1; then
+                echo "  FAIL  $p installed - Vitta must not ship it"
+                FAIL=1
+            else
+                echo "  ok    $p not installed"
+            fi
+        done
+        VITTA_FORBIDDEN=$(rpm -qa --qf "%{NAME}\n" | grep -E "^(gnome-session|cockpit|setroubleshoot|sysstat$)" || true)
+        if [ -n "$VITTA_FORBIDDEN" ]; then
+            echo "  FAIL  forbidden package families installed: $(echo $VITTA_FORBIDDEN)"
+            FAIL=1
+        else
+            echo "  ok    no gnome-session* / cockpit* / setroubleshoot* / sysstat"
+        fi
+    fi
     echo "Phase 0 bootstrap binaries:"
     for bin in pass gpg pinentry-curses age ssh git jq curl; do check_bin "$bin"; done
     check_rpm pinentry
@@ -217,7 +256,16 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     # :latest canary has none. Terra zed then installs plain zed-cli and there
     # is no zeditor. Dotfiles launch "zeditor", so losing zfs upstream (e.g. a
     # base without ublue akmods) changes the editor command - see MAINTENANCE.md.
-    if rpm -q zfs >/dev/null 2>&1; then
+    # Vitta has no zfs by design, so Terra resolves plain zed-cli; the
+    # zeditor name dotfiles launch is a Vitta overlay link (later task).
+    if [ "$RECIPE_NAME" = "vitta" ]; then
+        if rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zed-cli-"; then
+            echo "  ok    /usr/bin/zed owned by Terra zed-cli (no zfs on Vitta)"
+        else
+            echo "  FAIL  Vitta /usr/bin/zed not owned by Terra zed-cli"
+            FAIL=1
+        fi
+    elif rpm -q zfs >/dev/null 2>&1; then
         check_bin zeditor
         if rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zfs-"; then
             echo "  ok    /usr/bin/zed owned by zfs (editor is zeditor)"
@@ -334,7 +382,13 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     # ublue-signed kmod (from ghcr.io/ublue-os/akmods main flavor).
     # Package name is `kmod-v4l2loopback` (meta) — backed by a versioned
     # `kmod-v4l2loopback-<kernel>` sub-package. Check the meta.
-    check_rpm kmod-v4l2loopback
+    # bluefin-dx ships the ublue-signed kmod; base-main does not. Vitta
+    # adds it via the akmods module in vitta-modules.yml (later task).
+    if [ "$RECIPE_NAME" = "vitta" ]; then
+        echo "  skip  kmod-v4l2loopback (not yet added to Vitta)"
+    else
+        check_rpm kmod-v4l2loopback
+    fi
     check_file /etc/modules-load.d/v4l2loopback.conf
     check_file /etc/modprobe.d/v4l2loopback.conf
     # Pin sentinel: v4l2loopback should be pinned to /dev/video10 — keeps
