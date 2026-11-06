@@ -151,6 +151,7 @@ System libraries the official Playwright Fedora deps list requires. Bake the lib
 | Step | Purpose | Why baked |
 |---|---|---|
 | `files/scripts/rebuild-font-cache.sh` | Bakes an epoch-stamped font cache into `/usr/lib/fontconfig/cache` at build time | First-boot coverage before `fc-cache-boot.service` has ever run (`/var` is empty on a new machine). **Corrected 2026-08-03:** previously wrote into `/var/cache/fontconfig` — which bluebuild `post_build.sh` (`rm -rf /var/*`) then deleted, making the bake a silent no-op — and used `--system-only`, which exits non-zero on this image. Now pins the cachedir with a throwaway `FONTCONFIG_FILE`, asserts the canary, and epoch-stamps. |
+| `files/scripts/install-monaspace-neon.sh` (Vitta only) | Downloads the pinned Monaspace Neon v1.400 archive and installs its 42 static OTF files into `/usr/share/fonts/monaspace-neon/` | The greetd greeter runs before user fonts exist. The installer verifies SHA-256 before extracting only `Static Fonts/Monaspace Neon/*.otf`; Vitta then reruns `rebuild-font-cache.sh` so the shared salted cache includes the new directory. |
 
 ## Explicitly NOT baked (with reasoning)
 

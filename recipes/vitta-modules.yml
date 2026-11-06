@@ -113,6 +113,14 @@ modules:
       - source: system/etc/pki/rpm-gpg
         destination: /etc/pki/rpm-gpg
 
+  # The greetd greeter starts before user fonts exist, so bake Monaspace Neon
+  # into the Vitta image and rebuild the shared salted fontconfig cache after
+  # the font directory exists. common.yml has already run its first rebuild.
+  - type: script
+    scripts:
+      - install-monaspace-neon.sh
+      - rebuild-font-cache.sh
+
   - type: systemd
     system:
       enabled:
