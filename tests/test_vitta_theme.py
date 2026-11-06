@@ -164,6 +164,35 @@ class VittaThemeTests(unittest.TestCase):
         self.assertNotIn("general {", rendered)
         self.assertNotIn("auth {", rendered)
 
+    def test_render_hyprlock_keeps_content_inside_innermost_shape(self):
+        rendered = run_cli(
+            "render", "hyprlock", "--mode", "dark",
+            "--palette", str(PALETTE), "--logo-dir", "/logos",
+        ).stdout
+        shapes = re.findall(r"shape \{\n(.*?)\n\}", rendered, re.DOTALL)
+        inner_width, inner_height = map(
+            int, re.search(r"size = (\d+), (\d+)", shapes[-1]).groups()
+        )
+        max_x = inner_width / 2 - 12
+        max_y = inner_height / 2 - 12
+
+        for kind in ("image", "input-field"):
+            for block in re.findall(rf"{kind} \{{\n(.*?)\n\}}", rendered, re.DOTALL):
+                width, height = map(
+                    int, re.search(r"size = (\d+), (\d+)", block).groups()
+                )
+                x, y = map(int, re.search(r"position = (-?\d+), (-?\d+)", block).groups())
+                self.assertLessEqual(abs(x) + width / 2, max_x)
+                self.assertLessEqual(abs(y) + height / 2, max_y)
+
+        labels = re.findall(r"label \{\n(.*?)\n\}", rendered, re.DOTALL)
+        self.assertGreaterEqual(len(labels), 3)
+        for block in labels:
+            x, y = map(int, re.search(r"position = (-?\d+), (-?\d+)", block).groups())
+            font_size = int(re.search(r"font_size = (\d+)", block).group(1))
+            self.assertLessEqual(abs(x), max_x)
+            self.assertLessEqual(abs(y) + font_size * 1.3 / 2, max_y)
+
 
 if __name__ == "__main__":
     unittest.main()
