@@ -75,13 +75,14 @@ class CoprFreshnessTests(unittest.TestCase):
         return (f"{COPR}/package?ownername={owner}&projectname={project}"
                 f"&packagename={package}&with_latest_build=true")
 
-    def run_audit(self):
+    def run_audit(self, fedora_major="44"):
         fixtures = self.directory / "responses.json"
         fixtures.write_text(json.dumps(self.responses))
         return subprocess.run(
             ["bash", str(ROOT / "scripts/audit-copr-freshness.sh")],
             env={**os.environ, "PATH": f"{self.directory}:{os.environ['PATH']}",
-                 "CURL_FIXTURES": str(fixtures), "GH_TOKEN": ""},
+                 "CURL_FIXTURES": str(fixtures), "GH_TOKEN": "",
+                 "FEDORA_MAJOR": fedora_major},
             capture_output=True, text=True, timeout=15,
         )
 
@@ -94,6 +95,18 @@ class CoprFreshnessTests(unittest.TestCase):
         self.chroots["fedora-rawhide-x86_64"]["state"] = "failed"
         result = self.run_audit()
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_target_chroot_follows_base_fedora_major(self):
+        # After upstream flips Fedora majors, auditing the old chroot would
+        # report a healthy build the image no longer installs.
+        result = self.run_audit(fedora_major="45")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("(fedora-45-x86_64)", result.stderr)
+
+    def test_invalid_fedora_major_fails(self):
+        result = self.run_audit(fedora_major="latest")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Fedora major", result.stderr)
 
     def test_missing_target_fails(self):
         del self.chroots[CHROOT]

@@ -6,6 +6,21 @@
 set -euo pipefail
 
 GRACE_DAYS=7
+
+# Audit the chroot the image actually installs from. Upstream bluefin-dx:stable
+# decides the Fedora major and flips it without our involvement; a hardcoded
+# chroot would keep auditing the previous release's build after the flip.
+# FEDORA_MAJOR overrides the lookup (offline tests, manual N+1 checks).
+if [ -z "${FEDORA_MAJOR:-}" ]; then
+  FEDORA_MAJOR=$(skopeo inspect --no-tags docker://ghcr.io/ublue-os/bluefin-dx:stable \
+    | jq -r '.Labels["org.opencontainers.image.version"] // empty' | cut -d. -f1)
+fi
+if [[ ! "$FEDORA_MAJOR" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: could not determine base Fedora major (got '${FEDORA_MAJOR}')" >&2
+  exit 1
+fi
+TARGET_CHROOT="fedora-${FEDORA_MAJOR}-x86_64"
+echo "auditing COPR chroot ${TARGET_CHROOT}"
 CURL=(curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 120)
 GITHUB_CURL=("${CURL[@]}")
 if [ -n "${GH_TOKEN:-}" ]; then
@@ -30,7 +45,7 @@ check_package() {
   copr_json=$("${CURL[@]}" \
     "https://copr.fedorainfracloud.org/api_3/package?ownername=${owner}&projectname=${project}&packagename=${package}&with_latest_build=true")
   # COPR marks a multi-chroot build failed when any architecture fails even if
-  # Fedora 44 x86_64 succeeded. Compare latest submitted source version here;
+  # the target chroot succeeded. Compare latest submitted source version here;
   # the image transaction + smoke gate separately prove our chroot is usable.
   copr_version=$(jq -r '.builds.latest.source_package.version // empty' <<< "$copr_json")
   copr_normalized=$(normalize_version <<< "$copr_version")
@@ -58,7 +73,7 @@ check_cgit_meson_package() {
   local owner=$1 project=$2 package=$3 meson_url=$4 atom_url=$5
   local meson atom upstream_version upstream_published copr_json copr_version
   local copr_normalized build_id build_json build_state build_ended build_age_days release_age_days
-  local chroot=fedora-44-x86_64
+  local chroot=$TARGET_CHROOT
 
   meson=$("${CURL[@]}" "$meson_url")
   upstream_version=$(sed -nE "s/^project\\('gpu-screen-recorder', 'c', version : '([^']+)'.*/\\1/p" <<< "$meson")

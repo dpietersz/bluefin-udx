@@ -6,11 +6,22 @@
 # gpgkey points at the baked file under files/system/etc/pki/rpm-gpg/, so the
 # image build never depends on Fyra Labs' web endpoints being up.
 #
-# Key was fetched 2026-06-03 from https://mirror.june.fish/fyra/terra44/key.asc
-# (one of the metalink mirrors).
+# Terra signs EACH Fedora release with a DIFFERENT key, and gpgkey= below uses
+# $releasever. Bake the next release's key before upstream Bluefin flips
+# Fedora majors, or skip_if_unavailable=True silently drops Terra and the build
+# dies on "No match" for zed/espanso-wayland/helium-browser-bin.
+# scripts/check-fedora-next.sh asserts every baked key exists for N+1.
+#
+# terra-44 — fetched 2026-06-03 from https://mirror.june.fish/fyra/terra44/key.asc
 #   Fingerprint: AE09 157A 4DE8 8B49 7EA1  D5D3 00CD AB43 DE22 6D6F
 #   UID:         Terra 44 <security@fyralabs.com>
 #   SHA-256:     77e2f7e36fe522c4c14d509741cadf83308b67b69800cf1ddc9ff8539925f468
+# terra-45 — fetched 2026-11-06 from https://repos.fyralabs.com/terra45/key.asc
+#   (the only terra45 metalink mirror); fingerprint cross-checked against
+#   three unrelated public repos pinning the same terra45 fingerprint.
+#   Fingerprint: C2AC 0212 4AF1 14F0 8659  2E3C 8DDE 7D14 C1C2 3D8C
+#   UID:         Terra 45 <security@fyralabs.com>
+#   SHA-256:     411e0c66b22a3f3d79651c05b13c0dbcd9edd72f6839e5e33d1fd5e1c6248f7b
 
 [terra]
 name=Terra $releasever

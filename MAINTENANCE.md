@@ -7,20 +7,22 @@ Set a recurring calendar reminder. Quick pass should take ~15 minutes.
 ## Checklist
 
 ### 1. CI smoke-boot status
-- [ ] Are the latest nightly builds for **both** `bluefin-udx` and `bluefin-udx-nvidia` green on GitHub Actions?
+- [ ] Are the latest nightly `(stable)` builds for **both** `bluefin-udx` and `bluefin-udx-nvidia` green on GitHub Actions?
 - [ ] If red for > 3 consecutive nights, investigate immediately (don't wait for the quarterly review).
+- [ ] Are the `(latest)` canary legs green? They build the same recipes on upstream `bluefin-dx:latest`, run the full smoke gate, and never push. Upstream `:latest` takes a new Fedora major (and other upstream changes) before `:stable`, so a red canary is your lead time to fix things before `:stable` moves. Run on schedule/dispatch only, not on PRs.
+- [ ] Is the `Fedora N+1 package resolution` job green? It resolves every recipe package on upstream's next-release base (`silverblue-main:<N+1>`) via `scripts/check-fedora-next.sh`. A `SKIP` notice just means no N+1 base exists yet.
 
 ### 2. COPR package freshness
 Check the **specific package page**, never only the parent project. Active multi-package projects can hide an abandoned package—the old `noctalia-shell-v5` setup stayed green this way for months.
 
 - [ ] `lionheartp/Hyprland :: hyprlock` — https://copr.fedorainfracloud.org/coprs/lionheartp/Hyprland/package/hyprlock/ — compare with https://github.com/hyprwm/hyprlock/releases/latest and confirm `hyprlock.repo` remains limited to hyprlock plus its ABI-matched Hypr libraries
-- [ ] `lionheartp/Hyprland :: gpu-screen-recorder` — https://copr.fedorainfracloud.org/coprs/lionheartp/Hyprland/package/gpu-screen-recorder/ — compare the latest successful Fedora 44 x86_64 build with the version in https://git.dec05eba.com/gpu-screen-recorder/plain/meson.build, confirm it was built within 90 days, and confirm `gpu-screen-recorder.repo` still has exact `includepkgs=gpu-screen-recorder` and `terra.repo` retains `excludepkgs=gpu-screen-recorder` to prevent competing-source overrides. Inspect the RPM spec for changes to the privileged `gsr-kms-server` helper; `/usr/bin/gsr-kms-server` must retain only `cap_sys_admin=ep` after composition.
+- [ ] `lionheartp/Hyprland :: gpu-screen-recorder` — https://copr.fedorainfracloud.org/coprs/lionheartp/Hyprland/package/gpu-screen-recorder/ — compare the latest successful build for the current base Fedora release (x86_64) with the version in https://git.dec05eba.com/gpu-screen-recorder/plain/meson.build, confirm it was built within 90 days, and confirm `gpu-screen-recorder.repo` still has exact `includepkgs=gpu-screen-recorder` and `terra.repo` retains `excludepkgs=gpu-screen-recorder` to prevent competing-source overrides. Inspect the RPM spec for changes to the privileged `gsr-kms-server` helper; `/usr/bin/gsr-kms-server` must retain only `cap_sys_admin=ep` after composition.
 - [ ] `sneexy/zen-browser :: zen-browser` — https://copr.fedorainfracloud.org/coprs/sneexy/zen-browser/package/zen-browser/ — compare its latest successful version with https://github.com/zen-browser/desktop/releases/latest
 - [ ] `barsnick/non-fed :: showmethekey` — https://copr.fedorainfracloud.org/coprs/barsnick/non-fed/package/showmethekey/ — compare with https://github.com/AlynxZhou/showmethekey/releases/latest and confirm `files/system/etc/yum.repos.d/showmethekey.repo` still limits the broad project to `showmethekey*`
 
 If a package is behind upstream—not merely old because upstream itself is quiet—switch to the documented fallback. Never infer package freshness from a COPR project's newest unrelated build. `scripts/audit-copr-freshness.sh` enforces this comparison in nightly CI after a seven-day packaging grace period; keep its package map aligned with every baked COPR.
 
-The `gpu-screen-recorder` audit selects the package's `fedora-44-x86_64` entry from COPR's monitor API and verifies that build's chroot status and completion time. Do not use `builds.latest`: a newer Rawhide-only rebuild caused false failures on 2026-09-10/11 despite a current, successful Fedora 44 build. The seven-day version grace and 90-day build-age limit still apply. Run offline regression checks with `python3 -m unittest discover -s tests -p 'test_audit_copr_freshness.py'` (also run in CI).
+The `gpu-screen-recorder` audit selects the package's `fedora-<N>-x86_64` entry from COPR's monitor API, where `<N>` is read from `bluefin-dx:stable`'s version label (override with `FEDORA_MAJOR=<N>`, e.g. `FEDORA_MAJOR=45 scripts/audit-copr-freshness.sh` to audit the next release ahead of a flip), and verifies that build's chroot status and completion time. Do not use `builds.latest`: a newer Rawhide-only rebuild caused false failures on 2026-09-10/11 despite a current, successful Fedora 44 build. The seven-day version grace and 90-day build-age limit still apply. Run offline regression checks with `python3 -m unittest discover -s tests -p 'test_audit_copr_freshness.py'` (also run in CI).
 
 **Direct upstream release installs:**
 - [ ] `nushell` — https://github.com/nushell/nushell/releases/latest — confirm the release still ships `nu-<version>-x86_64-unknown-linux-gnu.tar.gz` plus `SHA256SUMS`, GitHub's asset digest matches that manifest, and CI/local installs report the same version. Nushell currently publishes no independent artifact signature; re-check quarterly and adopt one if offered.
@@ -36,7 +38,7 @@ The `gpu-screen-recorder` audit selects the package's `fedora-44-x86_64` entry f
 Verify every non-Fedora repository still resolves metadata and validates its GPG key:
 - [ ] Microsoft Teams — https://repo.teamsforlinux.de/rpm/teams-for-linux.repo
 - [ ] Beekeeper Studio — baked `files/system/etc/yum.repos.d/beekeeper-studio.repo`
-- [ ] Terra — baked `files/system/etc/yum.repos.d/terra.repo`
+- [ ] Terra — baked `files/system/etc/yum.repos.d/terra.repo`. Terra signs **each Fedora release with a different key** and `gpgkey=` uses `$releasever`, so `files/system/etc/pki/rpm-gpg/RPM-GPG-KEY-terra-<N>` must exist for the current **and next** release. Fetch from `https://repos.fyralabs.com/terra<N>/key.asc`, record fingerprint + SHA-256 in `terra.repo`, cross-check the fingerprint against an independent source. Without it, `skip_if_unavailable=True` silently drops Terra and the build dies on `No match` for zed/espanso-wayland/helium-browser-bin. `scripts/check-fedora-next.sh` fails on a missing N+1 key.
 
 A failure breaks the image build. Renovate does **not** understand COPR or vendor-repository freshness; this review owns it.
 
@@ -94,9 +96,22 @@ Background, if this ever regresses:
 - actions/runner-images#14597 — the image change that introduced fuse-overlayfs 1.16
 - Symptom pair to recognise: `database disk image is malformed` / `Error -1 running transaction`, **or** a uniform ~11 min per layer commit regardless of what the layer does. Both mean the same thing.
 
-### 8. Bluefin-DX base image cadence
+### 8. Upstream Bluefin Classic health
+
+Since September 2026 upstream's core team ships **Dakota** (BuildStream, Flatpak-first), **Utah** (Bluefin on Fedora Hummingbird, pre-alpha) and **Bluefin Server**. `ublue-os/bluefin` — what `bluefin-dx` is built from — was rebranded **Bluefin Classic** and handed to new maintainers ([handoff discussion #4951](https://github.com/ublue-os/bluefin/discussions/4951), [blog: Still Roaring](https://docs.projectbluefin.io/blog/still-roaring-bluefin-classic-and-lts/)). Layering, which this whole repo is, is officially unsupported on every variant. Our base is still alive, but it is no longer the flagship, so watch it like a third-party dependency.
+
+Check monthly-ish, not only quarterly — subscribe to https://docs.projectbluefin.io/blog/rss.xml:
+
+- [ ] **`:stable` freshness.** `skopeo inspect --no-tags docker://ghcr.io/ublue-os/bluefin-dx:stable | jq -r '.Created, .Labels["org.opencontainers.image.version"]'`. Upstream ships weekly (Tuesdays). Older than ~3 weeks without a blog/issue explanation = investigate.
+- [ ] **Fedora major bump.** Track the Renovate `silverblue-main` major PR in `ublue-os/bluefin` (F45: [#5016](https://github.com/ublue-os/bluefin/pull/5016); its first builds failed on an akmods kernel-pin mismatch, 2026-10-24). When it merges, `:latest` flips first → our `(latest)` canary legs flip with it. Before `:stable` follows: canary green, `check-fedora-next.sh` green, next Terra key baked.
+- [ ] **"Pull directly from Fedora" base swap.** Announced for Classic (drop the `ghcr.io/ublue-os/silverblue-main` layer, build on Fedora's own Silverblue). Not landed as of 2026-11-06 — watch `ARG BASE_IMAGE` in https://github.com/ublue-os/bluefin/blob/main/Containerfile and `image-versions.yml`. When it lands, re-verify the things we inherit from the Universal Blue layer and assume in our recipe:
+  - `kmod-v4l2loopback` pre-built and signed with the ublue MOK (Phase 3d; Secure Boot loading)
+  - the Negativo17 multimedia stack (why `rpmfusion-free-telegram.repo` is package-scoped; `h264_vaapi`/`h264_nvenc` ffmpeg encoders in the smoke gate)
+  - `zfs` owning `/usr/bin/zed` (Terra `zed` packaging choice + smoke assertion)
+  - NVIDIA open driver, `nvidia-container-toolkit`, `nvidia-smi` in `bluefin-dx-nvidia-open`
+- [ ] **DX content drift.** Skim `ublue-os/bluefin` merged PRs touching `build_files/dx/` (e.g. `docker-model-plugin` replaced by brew `llmman`, [#4937](https://github.com/ublue-os/bluefin/pull/4937), 2026-10). Anything we rely on that leaves DX must be re-homed (recipe, dotfiles, or boxkit).
+- [ ] **Maintainer pulse.** Non-Renovate commits to `ublue-os/bluefin` in the last 60 days, open-issue response, blog posts mentioning Classic. Silence is the earliest signal that a fallback base decision is due.
 - [ ] Is `bluefin-dx:stable` still the right channel? If you've been on `:latest` mentally but `:stable` in recipe, reconcile.
-- [ ] Major Fedora version bump coming? Add to the next review's agenda.
 
 ### 9. macOS reality check
 - [ ] Did anything in `dotfiles/.chezmoiscripts/run_once_before_01b-install-homebrew-packages.sh.tmpl` need a corresponding Linux update that didn't land?

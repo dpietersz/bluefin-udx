@@ -198,7 +198,9 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     fi
 
     echo "Baked GPG keys (insulate build from upstream key-host outages):"
-    check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-terra-44
+    # Terra signs each Fedora release with its own key; terra.repo uses
+    # $releasever, so the key for the booted release must be baked.
+    check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-terra-$(rpm -E %fedora)
     check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-beekeeper-studio
     check_file /etc/yum.repos.d/terra.repo
     check_file /etc/yum.repos.d/beekeeper-studio.repo

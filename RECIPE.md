@@ -62,7 +62,7 @@ If a package is AUR-only / experimental / rarely launched, it stays in distrobox
 | Browserpass + browserpass-chromium | Fedora repo | system-integration (native messaging w/ pass) |
 | Beekeeper Studio | vendor RPM (`beekeeperstudio.io`) — corrected `.repo` + baked GPG key | stable + integration |
 | Zed editor | **Terra** (`zed`) — *not* a dedicated COPR | system-tool (code editor). Terra's `zed` is zfs-collision-aware: `Requires: (zed-cli-compat-zfs if zfs else zed-cli)`, so on the zfs-shipping base the editor binary is `/usr/bin/zeditor` and `/usr/bin/zed` stays the ZFS Event Daemon. **Do not re-add the `che/zed` COPR** — it ships a monolithic `zed` that claims `/usr/bin/zed` + `dev.zed.Zed.desktop`/`metainfo`; with both repos enabled dnf picks the higher version and a che/zed win = 3-way file conflict that kills the build (root cause of the 2026-06-14 nightly failure). Fallback if Terra ever drops `zed`: pin a che/zed build *and* exclude Terra's `zed*`, or build from source. |
-| Terra repo (espanso-wayland, helium-browser-bin, zed) | metalink `tetsudou.fyralabs.com` + baked GPG key | unattended-build immunity to `repos.fyralabs.com` outages |
+| Terra repo (espanso-wayland, helium-browser-bin, zed) | metalink `tetsudou.fyralabs.com` + baked per-release GPG keys (`RPM-GPG-KEY-terra-44`, `-45`) | unattended-build immunity to `repos.fyralabs.com` outages; Terra uses a different key per Fedora release, so bake N+1 before upstream flips (see MAINTENANCE.md §3) |
 | Bruno | vendor RPM (`usebruno.com`) | stable + integration |
 | LocalSend | GH releases RPM | system-integration (host firewall already wired) |
 | Polypane | AppImage extract → `/opt/polypane` | stable + integration |

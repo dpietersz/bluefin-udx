@@ -102,6 +102,11 @@ CID=$(podman create ghcr.io/blue-build/cli:latest-installer /bin/true)
 podman cp "$CID:/out/bluebuild" ~/.local/bin/bluebuild
 podman rm "$CID"
 
+# Will every recipe package still resolve on the next Fedora major?
+# (auto-detects N+1 from bluefin-dx:stable; also runs nightly in CI)
+./scripts/check-fedora-next.sh
+./scripts/check-fedora-next.sh 45
+
 # Verify a signed image manually (cosign.pub is the same key baked at /usr/lib/pki/containers/)
 cosign verify --key cosign.pub ghcr.io/dpietersz/bluefin-udx-nvidia:stable
 

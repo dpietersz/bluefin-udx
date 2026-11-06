@@ -25,8 +25,34 @@ permissions:
   id-token: write
 
 jobs:
+  # --------------------------------------------------------------------------
+  # Fedora N+1 package-resolution canary. Answers "would every package our
+  # recipes layer still resolve on the next Fedora major?" weeks before
+  # upstream publishes a bluefin-dx image on it (it only needs upstream's base,
+  # silverblue-main:<N+1>). Catches dead COPR chroots, repos that trail the new
+  # release, and per-release GPG keys we forgot to bake (Terra). Independent of
+  # the build job: a red canary never blocks publishing today's :stable.
+  # --------------------------------------------------------------------------
+  fedora-next:
+    name: Fedora N+1 package resolution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve recipe packages on the next Fedora major
+        env:
+          # Docker, not podman: this job commits no layers, and the runner's
+          # podman ships with the fuse-overlayfs config the build job has to
+          # tear down (see "Pin Podman" below). Not worth repeating here.
+          ENGINE: docker
+        run: scripts/check-fedora-next.sh
+
   build:
-    name: Build ${{ matrix.recipe }}
+    name: Build ${{ matrix.recipe }} (${{ matrix.stream }})
     runs-on: ubuntu-24.04
     # A green build is ~20 min. The default 6h ceiling let the 2026-08-20 run
     # burn a full six hours on one leg before reporting; cap it so a storage or
@@ -38,10 +64,28 @@ jobs:
         recipe:
           - bluefin-udx
           - bluefin-udx-nvidia
+        # stable = what we publish. latest = canary on upstream's bluefin-dx
+        # :latest stream, which moves to a new Fedora major (and picks up other
+        # upstream changes) before :stable does. Canary legs build and run the
+        # full smoke gate but NEVER push. Skipped on PRs to keep PR runs fast.
+        stream: ${{ fromJSON(github.event_name == 'pull_request' && '["stable"]' || '["stable", "latest"]') }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Point canary leg at upstream :latest
+        if: matrix.stream == 'latest'
+        run: |
+          set -euo pipefail
+          RECIPE_FILE="recipes/${{ matrix.recipe }}.yml"
+          sed -i 's/^image-version: stable$/image-version: latest/' "$RECIPE_FILE"
+          if ! grep -qx 'image-version: latest' "$RECIPE_FILE"; then
+            echo "::error::Could not switch $RECIPE_FILE to image-version: latest"
+            exit 1
+          fi
+          skopeo inspect --no-tags "docker://$(yq -r '.["base-image"]' "$RECIPE_FILE"):latest" \
+            | jq -r '"upstream :latest = " + .Labels["org.opencontainers.image.version"]'
 
       - name: Test COPR freshness audit
         run: python3 -m unittest discover -s tests -p 'test_audit_copr_freshness.py'
@@ -556,7 +600,9 @@ jobs:
                 echo "  ok    proton-mail shared libraries resolved"
             fi
             echo "Baked GPG keys + .repo files (insulate build from upstream key-host outages):"
-            check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-terra-44
+            # Terra signs each Fedora release with its own key; terra.repo uses
+            # $releasever, so the key for the booted release must be baked.
+            check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-terra-$(rpm -E %fedora)
             check_file /etc/pki/rpm-gpg/RPM-GPG-KEY-beekeeper-studio
             check_file /etc/yum.repos.d/terra.repo
             check_file /etc/yum.repos.d/beekeeper-studio.repo
@@ -771,7 +817,7 @@ jobs:
       # version chasing.
       - name: Log in to ghcr + lowercase registry
         id: regcase
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && matrix.stream == 'stable'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
@@ -796,7 +842,7 @@ jobs:
           echo "lowercase=${LOWER}" >> "$GITHUB_OUTPUT"
 
       - name: Tag and push to ghcr
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && matrix.stream == 'stable'
         id: push
         env:
           REGISTRY_AUTH_FILE: /tmp/auth.json
@@ -832,11 +878,11 @@ jobs:
           echo "Will sign: ${REG}/${NAME}@${DIGEST}"
 
       - name: Install cosign
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && matrix.stream == 'stable'
         uses: sigstore/cosign-installer@v3.10.0
 
       - name: Sign image
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && matrix.stream == 'stable'
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
           COSIGN_PASSWORD: ""
