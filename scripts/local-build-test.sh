@@ -295,6 +295,32 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
         else
             echo "  FAIL  greetd in /usr/lib/passwd without shadow entry: pam_unix account before=$VITTA_CHK_BEFORE sync=$VITTA_SYNC_RC after=$VITTA_CHK_AFTER shadow=${VITTA_GREETD_SHADOW:-none}"; FAIL=1
         fi
+        # Boot splash (R23): Plymouth theme vitta, default via plymouthd.defaults (wins on rebased
+        # machines: /usr comes from the image, /etc keeps its 3-way merge), and baked into the
+        # image initramfs, which is what bootc boots. lsinitrd proves the rebuild picked it up.
+        echo "Vitta boot splash (Plymouth):"
+        check_rpm plymouth-plugin-script
+        VITTA_PLY_PLUGINS=$(plymouth --get-splash-plugin-path 2>/dev/null || echo /usr/lib64/plymouth/)
+        check_file "${VITTA_PLY_PLUGINS}script.so"
+        VITTA_PLY_FILES="vitta.plymouth vitta.script band1.png band2.png band3.png band4.png fg.png muted.png field.png"
+        for VITTA_H in 720 768 800 900 1080 1200 1440 1600 1800 2160; do VITTA_PLY_FILES="$VITTA_PLY_FILES badge-$VITTA_H.png wordmark-$VITTA_H.png"; done
+        for VITTA_PLY_FILE in $VITTA_PLY_FILES; do check_file "/usr/share/plymouth/themes/vitta/$VITTA_PLY_FILE"; done
+        VITTA_PLY_THEME=$(plymouth-set-default-theme 2>/dev/null || true)
+        if [ "$VITTA_PLY_THEME" = vitta ] && grep -qx "Theme=vitta" /usr/share/plymouth/plymouthd.defaults; then echo "  ok    default Plymouth theme vitta (plymouthd.defaults)"; else echo "  FAIL  default Plymouth theme is ${VITTA_PLY_THEME:-unset}, expected vitta from /usr/share/plymouth/plymouthd.defaults"; FAIL=1; fi
+        if grep -Eq "^[[:space:]]*Theme[[:space:]]*=" /etc/plymouth/plymouthd.conf 2>/dev/null; then echo "  FAIL  /etc/plymouth/plymouthd.conf sets Theme=, outranking plymouthd.defaults"; FAIL=1; else echo "  ok    /etc/plymouth/plymouthd.conf leaves Theme= to the defaults"; fi
+        VITTA_INITRAMFS=$(ls /usr/lib/modules/*/initramfs.img 2>/dev/null | head -n 1)
+        VITTA_LSINITRD=$(lsinitrd "$VITTA_INITRAMFS" 2>/dev/null || true)
+        for VITTA_INITRD_FILE in usr/share/plymouth/themes/vitta/vitta.plymouth usr/share/plymouth/themes/vitta/vitta.script usr/share/plymouth/themes/vitta/badge-1080.png usr/share/plymouth/themes/vitta/wordmark-1080.png usr/share/plymouth/themes/vitta/band1.png usr/lib64/plymouth/script.so usr/lib64/plymouth/label-freetype.so usr/share/fonts/Plymouth.ttf; do
+            if printf "%s\n" "$VITTA_LSINITRD" | grep -qF " $VITTA_INITRD_FILE"; then echo "  ok    initramfs has $VITTA_INITRD_FILE"; else echo "  FAIL  initramfs ${VITTA_INITRAMFS:-?} lacks $VITTA_INITRD_FILE"; FAIL=1; fi
+        done
+        if lsinitrd -f usr/share/plymouth/plymouthd.defaults "$VITTA_INITRAMFS" 2>/dev/null | grep -qx "Theme=vitta"; then echo "  ok    initramfs plymouthd.defaults: Theme=vitta"; else echo "  FAIL  initramfs plymouthd.defaults does not select vitta"; FAIL=1; fi
+        # The rebuild must keep what makes the initramfs boot an ostree deployment at all.
+        for VITTA_DRACUT_MOD in ostree systemd plymouth; do
+            if printf "%s\n" "$VITTA_LSINITRD" | sed -n "/^dracut modules:/,/^=====/p" | grep -qx "$VITTA_DRACUT_MOD"; then echo "  ok    initramfs dracut module $VITTA_DRACUT_MOD"; else echo "  FAIL  initramfs lacks dracut module $VITTA_DRACUT_MOD"; FAIL=1; fi
+        done
+        # The splash only shows with rhgb/splash on the command line; those come from the install
+        # (rebases keep theirs). Nothing in the image may switch Plymouth off.
+        if grep -rhsE "plymouth[.]enable=0|rd[.]plymouth=0|nosplash" /usr/lib/bootc/kargs.d; then echo "  FAIL  a bootc kargs.d entry disables Plymouth"; FAIL=1; else echo "  ok    no bootc kargs.d entry disables Plymouth"; fi
     fi
     echo "Phase 0 bootstrap binaries:"
     for bin in pass gpg pinentry-curses age ssh git jq curl; do check_bin "$bin"; done

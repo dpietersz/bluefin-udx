@@ -18,6 +18,8 @@
 #                                 install/uninstall deletes.
 #   4. systemd                  — enables units shipped by packages AND by the
 #                                 overlay, so it must follow both.
+#   The initramfs is regenerated at the very end of recipes/vitta.yml, after
+#   the os-release module, so it carries the Plymouth theme and Vitta identity.
 
 modules:
   # Only the repo definitions + their baked keys from the Vitta overlay. Same
@@ -84,6 +86,9 @@ modules:
       - greetd
       - cage
       - quickshell
+      # Boot splash: the Vitta Plymouth theme (files/vitta/usr/share/plymouth/
+      # themes/vitta) is a script-plugin theme; base-main ships only two-step.
+      - plymouth-plugin-script
     # install + remove in one module = one `rpm-ostree override remove ...
     # --install=...` transaction, which is what lets tuned-ppd replace ppd:
     remove:
@@ -126,6 +131,10 @@ modules:
     scripts:
       - install-monaspace-neon.sh
       - rebuild-font-cache.sh
+      # Theme=vitta in /usr/share/plymouth/plymouthd.defaults (needs the theme
+      # from the overlay above). recipes/vitta.yml regenerates the initramfs
+      # last so the theme, its images and script.so are inside it.
+      - vitta-plymouth-theme.sh
 
   - type: systemd
     system:

@@ -28,8 +28,8 @@ modules:
   # are written double-quoted (ID="vitta"), which os-release(5) permits.
   # ID_LIKE keeps Fedora-family detection (dnf tooling, distro probes) working
   # once ID stops being "fedora" — the same thing Bluefin does (ID=bluefin,
-  # ID_LIKE="fedora"). Keep this module last: earlier modules and their
-  # scripts then still see the stock Fedora identity.
+  # ID_LIKE="fedora"). Keep this after every other module except initramfs:
+  # earlier modules and their scripts then still see the stock Fedora identity.
   - type: os-release
     properties:
       ID: vitta
@@ -38,3 +38,11 @@ modules:
       PRETTY_NAME: "Vitta 44"
       VARIANT_ID: vitta
       IMAGE_ID: vitta
+
+  # Rebuild /usr/lib/modules/<kver>/initramfs.img (dracut --no-hostonly --add
+  # ostree, the flags base-main itself uses). base-main's prebuilt initramfs
+  # carries its own Plymouth theme; bootc boots the image's initramfs as is,
+  # so the Vitta splash (theme, images, script.so, Theme=vitta) only reaches
+  # the boot screen through this rebuild. Last on purpose: it captures every
+  # earlier change, including the Vitta os-release (initrd-release).
+  - type: initramfs
