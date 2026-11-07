@@ -15,3 +15,6 @@ files/scripts/build-pins.env
 .claude/
 __pycache__/
 *.pyc
+
+# Vitta boot splash preview frames (scripts/vitta-bootsplash-preview.sh)
+/bootsplash-preview/
