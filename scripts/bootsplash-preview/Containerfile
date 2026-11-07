@@ -1,0 +1,13 @@
+# Offscreen runtime for the Vitta Plymouth theme (scripts/vitta-bootsplash-preview.sh).
+# Stock Fedora plymouth + script/label plugins, plus the x11 renderer that
+# Fedora ships in plymouth-devel, drawn into an Xvfb screen. No /dev/dri,
+# /dev/fb* or VT ever reaches this container, so plymouthd cannot touch the
+# host console.
+ARG FEDORA=44
+FROM registry.fedoraproject.org/fedora:${FEDORA}
+RUN dnf -y install --setopt=install_weak_deps=False \
+      plymouth plymouth-plugin-script plymouth-plugin-label plymouth-devel \
+      xorg-x11-server-Xvfb xdotool xwd ImageMagick \
+      python3-pillow python3-numpy \
+      google-noto-sans-vf-fonts google-noto-sans-mono-vf-fonts fontconfig \
+    && dnf clean all
