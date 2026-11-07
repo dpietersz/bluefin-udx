@@ -132,6 +132,9 @@ modules:
       enabled:
         - vitta-groups.service
         - vitta-libvirt-relabel.service
+        # Locked /etc/shadow entry for greetd & co. on rebased machines, so
+        # user@<greetd uid>.service passes pam_unix (vitta-shadow-sync).
+        - vitta-shadow-sync.service
         - tailscaled.service
         - docker.socket
         # greetd.service carries Alias=display-manager.service, so enabling it

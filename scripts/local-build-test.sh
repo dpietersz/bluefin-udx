@@ -147,7 +147,7 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
         # Offline query of unit symlinks/presets; needs no running systemd.
         # The libvirt sockets come from Fedora presets applied in the libvirt %post;
         # the Windows work VM needs them, so assert rather than trust the preset.
-        for VITTA_UNIT in vitta-groups.service vitta-libvirt-relabel.service tailscaled.service docker.socket \
+        for VITTA_UNIT in vitta-groups.service vitta-libvirt-relabel.service vitta-shadow-sync.service tailscaled.service docker.socket \
                           brew-setup.service brew-update.timer brew-upgrade.timer tuned.service tuned-ppd.service \
                           virtqemud.socket virtnetworkd.socket virtstoraged.socket; do
             VITTA_UNIT_STATE=$(systemctl is-enabled "$VITTA_UNIT" 2>/dev/null || true)
@@ -275,6 +275,24 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
         systemd-tmpfiles --create --prefix=/var/lib/greetd >/dev/null 2>&1 || true
         VITTA_PORTAL_MASK=$(readlink /var/lib/greetd/.config/systemd/user/xdg-desktop-portal.service 2>/dev/null || true)
         if [ "$VITTA_PORTAL_MASK" = /dev/null ]; then echo "  ok    tmpfiles.d recreates the greeter xdg-desktop-portal mask"; else echo "  FAIL  greeter xdg-desktop-portal mask not recreated by tmpfiles.d (got: ${VITTA_PORTAL_MASK:-nothing})"; FAIL=1; fi
+        # user@<greetd uid> runs the systemd-user PAM stack; pam_unix account returns
+        # AUTHINFO_UNAVAIL for a passwd "x" account without a shadow entry. Fresh install:
+        # the image /etc/shadow must cover every shadowed account. Rebase with layered packages
+        # (T580): rpm-ostree moves greetd into /usr/lib/passwd while the old /etc/shadow is kept;
+        # vitta-shadow-sync must add the entry. unix_chkpwd chkexpiry is the pam_unix account check.
+        VITTA_NOSHADOW=$(getent passwd | while IFS=: read -r VU VP VREST; do [ "$VP" = x ] && ! getent shadow "$VU" >/dev/null && printf "%s " "$VU"; done; true)
+        if [ -z "$VITTA_NOSHADOW" ]; then echo "  ok    every shadowed account has an /etc/shadow entry"; else echo "  FAIL  accounts without an /etc/shadow entry (user@ PAM fails): $VITTA_NOSHADOW"; FAIL=1; fi
+        VITTA_GREETD_PW=$(grep -h -m1 "^greetd:" /etc/passwd /usr/lib/passwd 2>/dev/null | head -n 1)
+        if [ -n "$VITTA_GREETD_PW" ]; then sed -i "/^greetd:/d" /etc/passwd /etc/shadow /usr/lib/passwd; printf "%s\n" "$VITTA_GREETD_PW" >> /usr/lib/passwd; fi
+        VITTA_CHK_BEFORE=0; /usr/sbin/unix_chkpwd greetd chkexpiry >/dev/null 2>&1 || VITTA_CHK_BEFORE=$?
+        VITTA_SYNC_RC=0; /usr/libexec/vitta/vitta-shadow-sync >/dev/null 2>&1 || VITTA_SYNC_RC=$?
+        VITTA_CHK_AFTER=0; /usr/sbin/unix_chkpwd greetd chkexpiry >/dev/null 2>&1 || VITTA_CHK_AFTER=$?
+        VITTA_GREETD_SHADOW=$(getent shadow greetd | cut -d: -f2 || true)
+        if [ "$VITTA_CHK_BEFORE" != 0 ] && [ "$VITTA_SYNC_RC/$VITTA_CHK_AFTER/$VITTA_GREETD_SHADOW" = "0/0/!*" ]; then
+            echo "  ok    rebase simulation: vitta-shadow-sync gives greetd a locked shadow entry (pam_unix account $VITTA_CHK_BEFORE -> 0)"
+        else
+            echo "  FAIL  greetd in /usr/lib/passwd without shadow entry: pam_unix account before=$VITTA_CHK_BEFORE sync=$VITTA_SYNC_RC after=$VITTA_CHK_AFTER shadow=${VITTA_GREETD_SHADOW:-none}"; FAIL=1
+        fi
     fi
     echo "Phase 0 bootstrap binaries:"
     for bin in pass gpg pinentry-curses age ssh git jq curl; do check_bin "$bin"; done
