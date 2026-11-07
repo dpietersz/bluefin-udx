@@ -242,7 +242,8 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
         if grep -Eqs "^d[[:space:]]+/var/lib/greetd[[:space:]]" /usr/lib/tmpfiles.d/*.conf; then echo "  ok    /var/lib/greetd created by tmpfiles.d"; else echo "  FAIL  no tmpfiles.d d-line creates /var/lib/greetd"; FAIL=1; fi
         if [ -x /usr/libexec/vitta/vitta-greeter ]; then echo "  ok    /usr/libexec/vitta/vitta-greeter executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greeter missing or not executable"; FAIL=1; fi
         # -m last: one output only; the default -m extend centres the card across a docked layout.
-        if grep -Eq "^exec cage -s -m last -- quickshell " /usr/libexec/vitta/vitta-greeter 2>/dev/null; then echo "  ok    vitta-greeter runs cage -s -m last"; else echo "  FAIL  vitta-greeter must exec cage -s -m last (single output when docked)"; FAIL=1; fi
+        # -d: cage answers xdg-decoration server_side, else Qt frames the greeter in white edges.
+        if grep -Eq "^exec cage -d -s -m last -- quickshell " /usr/libexec/vitta/vitta-greeter 2>/dev/null; then echo "  ok    vitta-greeter runs cage -d -s -m last"; else echo "  FAIL  vitta-greeter must exec cage -d -s -m last (no client decoration frame, single output when docked)"; FAIL=1; fi
         if VITTA_QS_VERSION=$(quickshell --version 2>&1); then echo "  ok    $VITTA_QS_VERSION"; else echo "  FAIL  quickshell --version: $VITTA_QS_VERSION"; FAIL=1; fi
         # Behavioural: load the production greeter QML headless. Catches QML type and
         # reference errors that would otherwise surface only as a black screen at boot.
@@ -263,9 +264,10 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
             echo "  FAIL  greeter launch call lacks the R14 session environment: ${VITTA_LAUNCH:-none}"; FAIL=1
         fi
         # Behavioural: drive ok/badpass/multiprompt/error through the preview backend
-        # headless (red status, cancellation, cleared + refocused password, launch env).
+        # headless (red status, cancellation, cleared + refocused password, launch env), then
+        # rerun under headless cage with the launcher flags: the window must cover the output.
         if VITTA_SELFTEST_LOG=$(vitta-greeter-preview --selftest 2>&1); then
-            echo "  ok    greeter selftest: ok badpass multiprompt error"
+            echo "  ok    greeter selftest: ok badpass multiprompt error, edge to edge in headless cage"
         else
             echo "  FAIL  greeter selftest:"; printf "%s\n" "$VITTA_SELFTEST_LOG" | grep -E "FAIL|FAILED|^    " | tail -n 30 | sed "s/^/          /"; FAIL=1
         fi
