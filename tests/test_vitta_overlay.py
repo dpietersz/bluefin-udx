@@ -5,14 +5,17 @@ seconds without a build.
 """
 
 import contextlib
+import errno
 import importlib.util
 from importlib.machinery import SourceFileLoader
 import io
+import os
 from pathlib import Path
 import re
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 sys.dont_write_bytecode = True
@@ -107,6 +110,97 @@ class VittaOverlayTests(unittest.TestCase):
                 self.assertEqual(sync.main(), 0)
             self.assertEqual(out.getvalue(), "")
             self.assertEqual((tmp / "shadow").read_text(), original + "\ngreetd:!*:::::::\n")
+
+    def shadow_fixture(self, tmp):
+        """Point the sync at tmp: greetd needs an entry, shadow lives in tmp/etc."""
+        sync = load_shadow_sync()
+        etc = tmp / "etc"
+        etc.mkdir()
+        (tmp / "lib-passwd").write_text("greetd:x:965:965::/var/lib/greetd:/usr/sbin/nologin\n")
+        (etc / "passwd").write_text("root:x:0:0:root:/root:/bin/bash\n")
+        (etc / "shadow").write_text("root:!locked::0:99999:7:::\n")
+        sync.IMAGE_PASSWD = str(tmp / "lib-passwd")
+        sync.LOCAL_PASSWD = str(etc / "passwd")
+        sync.SHADOW = str(etc / "shadow")
+        sync.LOCK = str(etc / ".pwd.lock")
+        return sync, etc
+
+    def test_shadow_sync_temp_copy_failure_leaves_shadow_unchanged(self):
+        # A short write followed by ENOSPC (full disk) while writing the copy:
+        # /etc/shadow keeps its inode and bytes, no temporary copy is left.
+        with tempfile.TemporaryDirectory() as tmp:
+            sync, etc = self.shadow_fixture(Path(tmp))
+            shadow = etc / "shadow"
+            before, inode = shadow.read_bytes(), shadow.stat().st_ino
+            real_write = os.write
+
+            def short_then_full(fd, data):
+                if fd > 2 and len(data) > 1:
+                    real_write(fd, bytes(data[: len(data) // 2]))
+                    raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+                return real_write(fd, data)
+
+            with mock.patch.object(sync.os, "write", short_then_full), \
+                    contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(sync.main(), 1)
+            self.assertIn("left unchanged", err.getvalue())
+            self.assertEqual(shadow.read_bytes(), before)
+            self.assertEqual(shadow.stat().st_ino, inode)
+            self.assertEqual(sorted(p.name for p in etc.iterdir()), [".pwd.lock", "passwd", "shadow"])
+
+            # A later run without the failure succeeds.
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(sync.main(), 0)
+            self.assertEqual(shadow.read_text(), before.decode() + "greetd:!*:::::::\n")
+
+    def test_shadow_sync_replaces_atomically_keeping_owner_mode_and_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sync, etc = self.shadow_fixture(Path(tmp))
+            shadow = etc / "shadow"
+            shadow.chmod(0o640)
+            (etc / ".shadow.vitta-stale").write_text("left by a power cut")
+            inode = shadow.stat().st_ino
+            label = b"system_u:object_r:shadow_t:s0\x00"
+            labels, calls = {str(shadow): label}, []
+
+            def getxattr(path, name, follow_symlinks=True):
+                self.assertEqual(name, "security.selinux")
+                if str(path) in labels:
+                    return labels[str(path)]
+                raise OSError(errno.ENODATA, "no label")
+
+            def setxattr(fd, name, value):
+                calls.append((os.readlink(f"/proc/self/fd/{fd}"), name, value))
+
+            renames, real_rename = [], os.rename
+
+            def rename(source, target):
+                renames.append((source, target))
+                real_rename(source, target)
+
+            fsynced = []
+            real_fsync = os.fsync
+
+            def fsync(fd):
+                fsynced.append(os.readlink(f"/proc/self/fd/{fd}"))
+                real_fsync(fd)
+
+            with mock.patch.object(sync.os, "getxattr", getxattr), \
+                    mock.patch.object(sync.os, "setxattr", setxattr), \
+                    mock.patch.object(sync.os, "rename", rename), \
+                    mock.patch.object(sync.os, "fsync", fsync), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(sync.main(), 0)
+            self.assertEqual(shadow.read_text(), "root:!locked::0:99999:7:::\ngreetd:!*:::::::\n")
+            self.assertNotEqual(shadow.stat().st_ino, inode, "replaced, not edited in place")
+            self.assertEqual(shadow.stat().st_mode & 0o7777, 0o640)
+            self.assertEqual((shadow.stat().st_uid, shadow.stat().st_gid), (os.getuid(), os.getgid()))
+            self.assertEqual(len(renames), 1)
+            temporary = renames[0][0]
+            self.assertEqual((os.path.dirname(temporary), renames[0][1]), (str(etc), str(shadow)))
+            self.assertEqual(calls, [(temporary, "security.selinux", label)], "shadow_t copied to the copy")
+            self.assertEqual(fsynced, [temporary, str(etc)], "copy fsynced before rename, /etc after")
+            self.assertEqual(sorted(p.name for p in etc.iterdir()), [".pwd.lock", "passwd", "shadow"])
 
 
 if __name__ == "__main__":
