@@ -18,37 +18,11 @@ ShellRoot {
         implicitHeight: 800
         color: theme.bg
 
-        Card {
+        LoginScreen {
             id: card
-            anchors.centerIn: parent
-            width: Math.min(560, Math.round(0.4 * window.width))
+            anchors.fill: parent
             theme: theme
             auth: auth
         }
-
-        Row {
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.margins: Math.round(32 * card.u)
-            spacing: Math.round(24 * card.u)
-
-            PowerButton { label: "reboot"; verb: "reboot" }
-            PowerButton { label: "shutdown"; verb: "poweroff" }
-        }
-    }
-
-    component PowerButton: Text {
-        id: button
-
-        required property string label
-        required property string verb
-
-        text: "[ " + label + " ]"
-        color: hover.hovered ? theme.fg : theme.muted
-        font.family: "Monaspace Neon"
-        font.pixelSize: Math.round(20 * card.u)
-
-        HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: auth.power(button.verb) }
     }
 }
