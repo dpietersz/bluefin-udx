@@ -1,0 +1,354 @@
+# vitta.script - Vitta boot splash for Plymouth's script plugin.
+#
+# Design: docs/superpowers/specs/2026-11-07-vitta-bootsplash-design.md, ruling
+# R23. Same visual language as the login screen (R20, files/vitta/usr/share/
+# vitta/greeter/LoginScreen.qml): four touching flat Gruvbox bands, each 2.2 %
+# of the screen height, the block centred at 40 % of the height. On the right,
+# centred at 81 % of the width, the badge: the Fedora logo (24 % of the height)
+# in a round bg-coloured gap (radius 0.54 x logo, as on the login screen) with
+# the Lenovo wordmark under it. The bands run in from the left edge and reach
+# the badge gap as boot progress reaches 1 (ease-out cubic). Every size follows
+# the screen height, so one script fits 1366x768 up to 3840x2160.
+#
+# Password and question prompts are deliberately plain (owner): prompt text, a
+# flat box, square bullets. Plymouth messages are plain text at the bottom.
+#
+# Images are pre-rendered per design height by
+# scripts/vitta-bootsplash-assets.py (badge-<H>.png = gap disc + logo,
+# wordmark-<H>.png). Plymouth scales with unfiltered bilinear sampling, which
+# aliases on large down-scales, so the script picks the smallest design height
+# >= the screen height and scales by at most ~1.2.
+#
+# Script-language notes: a bare assignment inside a function creates a local
+# unless a global of that name already exists, so shared state lives in the
+# global hashes below and function temporaries use `local.`. Anything that
+# fails here (missing image, bad value) only draws less; it cannot hang boot.
+
+# ---- palette: files/vitta/usr/share/vitta/theme/palette.toml [dark] ---------
+# Plymouth truncates 255 * channel to an integer, so pass (v + 0.5) / 255: a
+# plain v / 255 can come back as v - 1.
+fun channel (v)
+{
+  return (v + 0.5) / 255;
+}
+
+palette.bg = [40, 40, 40];         # bg    #282828
+palette.fg = [235, 219, 178];      # fg    #ebdbb2
+palette.muted = [168, 153, 132];   # muted #a89984
+# Band colours stripe1..4 (#689d6a #458588 #d79921 #cc241d) live in the 1x1
+# tiles band1.png .. band4.png; field.png (#3c3836) is the prompt box fill.
+
+Window.SetBackgroundTopColor (channel (palette.bg[0]), channel (palette.bg[1]), channel (palette.bg[2]));
+Window.SetBackgroundBottomColor (channel (palette.bg[0]), channel (palette.bg[1]), channel (palette.bg[2]));
+
+fun round (v)
+{
+  return Math.Int (v + 0.5);
+}
+
+fun text_image (text, colour)
+{
+  return Image.Text (text, channel (colour[0]), channel (colour[1]), channel (colour[2]), 1,
+                     "Sans " + geo.font_px + "px");
+}
+
+# ---- shared state ----------------------------------------------------------------
+# Every hash a function writes is created here first, so bare writes inside
+# functions reach these globals instead of making locals.
+screen.w = 0;
+geo.band = 0;
+badge.x = 0;
+word.x = 0;
+bands.length = 0;
+progress.target = 0;   # latest boot / offline-update progress, never decreasing
+progress.shown = 0;    # eases towards target each frame so status jumps glide
+message.text = "";
+prompt.active = 0;     # 1 while a password / question prompt is up
+prompt.text = "";
+prompt.entry_text = "";
+prompt.bullets_wanted = 0;
+
+# ---- pre-rendered design heights (scripts/vitta-bootsplash-assets.py) -------------
+ladder = [720, 768, 800, 900, 1080, 1200, 1440, 1600, 1800, 2160];
+ladder_count = 10;
+
+fun design_height (h)
+{
+  local.i = 0;
+  while (local.i < ladder_count)
+    {
+      if (ladder[local.i] >= h)
+        return ladder[local.i];
+      local.i = local.i + 1;
+    }
+  return ladder[ladder_count - 1];
+}
+
+# ---- layout ------------------------------------------------------------------------
+# Built from the current window size; re-run on display hotplug (e.g. the
+# simpledrm -> i915 handover), since the first display can differ in size.
+fun layout ()
+{
+  screen.x = Window.GetX ();
+  screen.y = Window.GetY ();
+  screen.w = Window.GetWidth ();
+  screen.h = Window.GetHeight ();
+
+  # R23; band / logo / gap rules identical to LoginScreen.qml (R20).
+  geo.band = Math.Max (1, round (0.022 * screen.h));       # one band's height
+  geo.centre = round (0.4 * screen.h);                     # centre of the band block
+  geo.top = geo.centre - 2 * geo.band;                     # top of band 1
+  geo.logo = round (0.24 * screen.h);                      # logo edge length
+  geo.gap = round (0.54 * geo.logo);                       # radius of the bg gap
+  geo.word_w = round (0.26 * screen.h);                    # Lenovo wordmark width
+  geo.word_top = geo.centre + geo.gap + round (0.01 * screen.h);
+  geo.margin = round (0.04 * screen.h);
+  geo.font_px = Math.Max (12, round (0.02 * screen.h));
+  # Badge centre at 81 % of the width; on narrow (4:3, portrait) screens pulled
+  # left just enough that the gap and the wordmark stay on screen.
+  geo.badge_half = Math.Max (geo.gap, Math.Int (geo.word_w / 2) + 1);
+  geo.badge_x = Math.Min (round (0.81 * screen.w), screen.w - geo.badge_half - round (0.02 * screen.h));
+  geo.design = design_height (screen.h);
+
+  # Badge: bg disc + Fedora logo in one image, the Lenovo wordmark under it.
+  local.image = Image ("badge-" + geo.design + ".png");
+  if (local.image.GetWidth () != 2 * geo.gap)
+    local.image = local.image.Scale (2 * geo.gap, 2 * geo.gap);
+  badge.sprite = Sprite (local.image);
+  badge.sprite.SetPosition (screen.x + geo.badge_x - geo.gap, screen.y + geo.centre - geo.gap, 10);
+
+  local.image = Image ("wordmark-" + geo.design + ".png");
+  local.word_h = round (local.image.GetHeight () * geo.word_w / local.image.GetWidth ());
+  if (local.image.GetWidth () != geo.word_w)
+    local.image = local.image.Scale (geo.word_w, local.word_h);
+  word.sprite = Sprite (local.image);
+  word.sprite.SetPosition (screen.x + geo.badge_x - Math.Int (geo.word_w / 2), screen.y + geo.word_top, 10);
+
+  # Bands: each one full-length tile (crisp edges: Tile copies pixels, no
+  # filtering). Growing = sliding it in from the left, so a frame costs no
+  # image work. Fully grown, the band ends at the badge centre, under the
+  # badge's bg disc, which cuts the round gap into the band ends.
+  bands.length = geo.badge_x;
+  bands.visible = -1;
+  for (local.i = 0; local.i < 4; local.i++)
+    {
+      bands[local.i].sprite = Sprite (Image ("band" + (local.i + 1) + ".png").Tile (bands.length, geo.band));
+      bands[local.i].sprite.SetPosition (screen.x - bands.length, screen.y + geo.top + local.i * geo.band, 1);
+      bands[local.i].sprite.SetOpacity (0);
+    }
+  place_bands (ease_out (progress.shown));
+
+  # Message line, bottom centre.
+  message.sprite = Sprite ();
+  message.sprite.SetOpacity (0);
+  if (message.text != "")
+    display_message_callback (message.text);
+
+  # Prompt: plain and functional (not styled, owner). Prompt text, then a flat
+  # box (muted 1-2 px border, field fill), square fg bullets for a password or
+  # the typed text for a question, and a Caps Lock hint under the box.
+  prompt.box_w = Math.Min (round (0.4 * screen.h), screen.w - 2 * geo.margin);
+  prompt.box_h = round (0.045 * screen.h);
+  prompt.border = Math.Max (1, round (0.002 * screen.h));
+  prompt.bullet = Math.Max (3, round (0.009 * screen.h));
+  prompt.pad = Math.Int ((prompt.box_h - prompt.bullet) / 2);
+  prompt.cap = Math.Int ((prompt.box_w - 2 * prompt.pad + prompt.bullet) / (2 * prompt.bullet));
+  prompt.line_h = text_image ("Ag", palette.fg).GetHeight ();
+  prompt.box_x = screen.x + Math.Int ((screen.w - prompt.box_w) / 2);
+  prompt.text_y = screen.y + round (0.7 * screen.h);
+  prompt.box_y = prompt.text_y + prompt.line_h + round (0.012 * screen.h);
+
+  prompt.label = Sprite ();
+  prompt.frame = Sprite (Image ("muted.png").Tile (prompt.box_w, prompt.box_h));
+  prompt.frame.SetPosition (prompt.box_x, prompt.box_y, 30);
+  prompt.field = Sprite (Image ("field.png").Tile (prompt.box_w - 2 * prompt.border,
+                                                   prompt.box_h - 2 * prompt.border));
+  prompt.field.SetPosition (prompt.box_x + prompt.border, prompt.box_y + prompt.border, 31);
+  prompt.entry = Sprite ();
+  local.image = text_image ("Caps Lock is on", palette.muted);
+  prompt.caps = Sprite (local.image);
+  prompt.caps.SetPosition (screen.x + Math.Int ((screen.w - local.image.GetWidth ()) / 2),
+                           prompt.box_y + prompt.box_h + round (0.012 * screen.h), 30);
+  prompt.bullet_image = Image ("fg.png").Tile (prompt.bullet, prompt.bullet);
+  prompt.bullets = [];
+  prompt.bullet_count = 0;
+  if (prompt.active)
+    show_prompt (prompt.text, prompt.entry_text, prompt.bullets_wanted);
+  else
+    prompt_opacity (0);
+}
+
+# ---- bands and progress -------------------------------------------------------------
+fun place_bands (fraction)
+{
+  local.visible = Math.Int (Math.Clamp (fraction, 0, 1) * bands.length + 0.5);
+  if (local.visible == bands.visible)
+    return;
+  bands.visible = local.visible;
+  for (local.i = 0; local.i < 4; local.i++)
+    {
+      bands[local.i].sprite.SetX (screen.x + local.visible - bands.length);
+      bands[local.i].sprite.SetOpacity (local.visible > 0);
+    }
+}
+
+fun ease_out (t)
+{
+  local.u = 1 - Math.Clamp (t, 0, 1);
+  return 1 - local.u * local.u * local.u;
+}
+
+fun set_target (t)
+{
+  t = Math.Clamp (t, 0, 1);
+  if (t > progress.target)
+    progress.target = t;
+}
+
+fun finish ()
+{
+  progress.target = 1;
+  progress.shown = 1;
+  place_bands (1);
+}
+
+fun refresh_callback ()
+{
+  if (progress.shown < progress.target)
+    {
+      local.step = (progress.target - progress.shown) * 0.25;
+      if (local.step < 0.002)
+        local.step = progress.target - progress.shown;
+      progress.shown = progress.shown + local.step;
+    }
+  place_bands (ease_out (progress.shown));
+}
+
+# Plymouth sends time-based boot progress in every mode; only a boot follows
+# it. Offline updates follow the updater's own percentage instead.
+fun boot_progress_callback (duration, fraction)
+{
+  if (mode == "boot")
+    set_target (fraction);
+}
+
+fun system_update_callback (percent)
+{
+  if (mode != "boot")
+    set_target (percent / 100);
+}
+
+# ---- messages: plain text, centred at the bottom -------------------------------------
+fun display_message_callback (text)
+{
+  message.text = text;
+  local.image = text_image (text, palette.fg);
+  message.sprite.SetImage (local.image);
+  message.sprite.SetPosition (screen.x + Math.Int ((screen.w - local.image.GetWidth ()) / 2),
+                              screen.y + screen.h - geo.margin - local.image.GetHeight (), 20);
+  message.sprite.SetOpacity (1);
+}
+
+fun hide_message_callback (text)
+{
+  if (text == message.text)
+    {
+      message.text = "";
+      message.sprite.SetOpacity (0);
+    }
+}
+
+# ---- password / question prompt ----------------------------------------------------
+# Only the password and question callbacks are set: the generic display-prompt
+# callback would receive the typed passphrase as text.
+fun prompt_opacity (opacity)
+{
+  prompt.label.SetOpacity (opacity);
+  prompt.frame.SetOpacity (opacity);
+  prompt.field.SetOpacity (opacity);
+  prompt.entry.SetOpacity (opacity && prompt.entry_text != "");
+  prompt.caps.SetOpacity (opacity && Plymouth.GetCapslockState ());
+}
+
+fun set_bullets (count)
+{
+  count = Math.Min (count, prompt.cap);
+  for (local.i = 0; local.i < count || local.i < prompt.bullet_count; local.i++)
+    {
+      if (!prompt.bullets[local.i])
+        {
+          prompt.bullets[local.i] = Sprite (prompt.bullet_image);
+          prompt.bullets[local.i].SetPosition (prompt.box_x + prompt.pad + 2 * local.i * prompt.bullet,
+                                               prompt.box_y + Math.Int ((prompt.box_h - prompt.bullet) / 2), 32);
+        }
+      prompt.bullets[local.i].SetOpacity (local.i < count);
+    }
+  prompt.bullet_count = Math.Max (count, prompt.bullet_count);
+}
+
+fun show_prompt (text, entry_text, bullets)
+{
+  prompt.active = 1;
+  prompt.text = text;
+  prompt.entry_text = entry_text;
+  prompt.bullets_wanted = bullets;
+
+  local.image = text_image (text, palette.fg);
+  prompt.label.SetImage (local.image);
+  prompt.label.SetPosition (screen.x + Math.Int ((screen.w - local.image.GetWidth ()) / 2), prompt.text_y, 30);
+
+  if (entry_text != "")
+    {
+      local.image = text_image (entry_text, palette.fg);
+      local.room = prompt.box_w - 2 * prompt.pad;
+      if (local.image.GetWidth () > local.room)
+        local.image = local.image.Crop (local.image.GetWidth () - local.room, 0, local.room, local.image.GetHeight ());
+      prompt.entry.SetImage (local.image);
+      prompt.entry.SetPosition (prompt.box_x + prompt.pad,
+                                prompt.box_y + Math.Int ((prompt.box_h - local.image.GetHeight ()) / 2), 32);
+    }
+
+  prompt_opacity (1);
+  set_bullets (bullets);
+}
+
+fun display_password_callback (text, bullets)
+{
+  show_prompt (text, "", bullets);
+}
+
+fun display_question_callback (text, entry_text)
+{
+  show_prompt (text, entry_text, 0);
+}
+
+fun display_normal_callback ()
+{
+  prompt.active = 0;
+  prompt.entry_text = "";
+  prompt_opacity (0);
+  set_bullets (0);
+}
+
+# ---- start --------------------------------------------------------------------------
+# Boot and offline updates follow progress; shutdown / reboot show the bands
+# fully grown.
+mode = Plymouth.GetMode ();
+if (mode != "boot" && mode != "updates" && mode != "system-upgrade" && mode != "firmware-upgrade")
+  {
+    progress.target = 1;
+    progress.shown = 1;
+  }
+
+layout ();
+
+Plymouth.SetRefreshFunction (refresh_callback);
+Plymouth.SetBootProgressFunction (boot_progress_callback);
+Plymouth.SetSystemUpdateFunction (system_update_callback);
+Plymouth.SetQuitFunction (finish);
+Plymouth.SetDisplayHotplugFunction (layout);
+Plymouth.SetDisplayMessageFunction (display_message_callback);
+Plymouth.SetHideMessageFunction (hide_message_callback);
+Plymouth.SetDisplayPasswordFunction (display_password_callback);
+Plymouth.SetDisplayQuestionFunction (display_question_callback);
+Plymouth.SetDisplayNormalFunction (display_normal_callback);
