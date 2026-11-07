@@ -206,6 +206,8 @@ Item {
             readOnly: card.auth.busy && !card.answeringEcho
             onAccepted: card.submitUser()
             onCancelled: card.cancel()
+            onTabbed: passField.input.forceActiveFocus()
+            onBacktabbed: passField.input.forceActiveFocus()
         }
 
         Field {
@@ -220,6 +222,8 @@ Item {
             readOnly: card.auth.busy && card.auth.awaiting !== "secret"
             onAccepted: card.submitPassword()
             onCancelled: card.cancel()
+            onTabbed: userField.input.forceActiveFocus()
+            onBacktabbed: userField.input.forceActiveFocus()
         }
 
         Text {
@@ -286,6 +290,11 @@ Item {
 
         signal accepted()
         signal cancelled()
+        // Tab / Shift+Tab. A bare TextInput is not in any focus chain and
+        // ignores Tab, so the card moves focus itself; the key is always
+        // consumed (never submits, never types a tab).
+        signal tabbed()
+        signal backtabbed()
 
         implicitHeight: Math.round(48 * u)
         color: theme.bg
@@ -323,6 +332,17 @@ Item {
             selectByMouse: true
             onAccepted: field.accepted()
             Keys.onEscapePressed: field.cancelled()
+            // xkb delivers Shift+Tab as Key_Backtab; accept Tab+Shift as well.
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Backtab
+                        || (event.key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier))) {
+                    event.accepted = true;
+                    field.backtabbed();
+                } else if (event.key === Qt.Key_Tab) {
+                    event.accepted = true;
+                    field.tabbed();
+                }
+            }
         }
 
         Text {

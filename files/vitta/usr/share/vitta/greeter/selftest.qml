@@ -1,4 +1,5 @@
 import QtQuick
+import QtTest
 import Quickshell
 
 // Noninteractive behaviour test for the greeter: the real Theme, Auth and
@@ -38,6 +39,9 @@ ShellRoot {
             theme: theme
             auth: auth
         }
+
+        // Real key events through the window to whatever item has focus.
+        TestEvent { id: keys }
     }
 
     readonly property var fake: auth.backend
@@ -125,6 +129,34 @@ ShellRoot {
         });
     }
 
+    // Tab / Shift+Tab move focus between the two fields (both directions
+    // cycle), as real key presses on the focused item. They must not submit,
+    // answer greetd or type a tab. Shift+Tab is sent both as xkb delivers it
+    // (Key_Backtab) and as Key_Tab with Shift held. `from`/`to` are the
+    // field the test starts on and the other one; ends back on `from`.
+    function pressTab(backwards, viaBacktab) {
+        const key = backwards && viaBacktab ? Qt.Key_Backtab : Qt.Key_Tab;
+        keys.keyClick(key, backwards ? Qt.ShiftModifier : Qt.NoModifier, -1);
+    }
+
+    function expectTabCycle(what, from, to) {
+        const before = { create: fake.createCount, responses: fake.responses.length,
+                         from: from.text, to: to.text, status: card.status };
+        check(from.input.activeFocus, what + ": starts on the " + from.label.replace(":", "") + " field");
+        pressTab(false, false);
+        check(to.input.activeFocus && !from.input.activeFocus, what + ": Tab moves focus to the other field");
+        pressTab(false, false);
+        check(from.input.activeFocus, what + ": Tab again cycles back");
+        pressTab(true, true);
+        check(to.input.activeFocus, what + ": Shift+Tab (Key_Backtab) moves to the other field");
+        pressTab(true, false);
+        check(from.input.activeFocus, what + ": Shift+Tab (Tab+Shift) moves back");
+        check(from.text === before.from && to.text === before.to, what + ": no tab typed, field texts unchanged");
+        check(fake.createCount === before.create && fake.responses.length === before.responses,
+              what + ": Tab neither submits nor answers greetd");
+        check(card.status === before.status, what + ": status unchanged");
+    }
+
     function expectLaunch(responses) {
         check(fake.launches.length === 1, "launched exactly once");
         const l = fake.launches[0] || {};
@@ -152,6 +184,8 @@ ShellRoot {
             check(card.status === "Verification code:" && !card.statusError, "echo prompt shown, not red");
             check(card.answeringEcho && login.label === "answer:", "user field relabelled answer:");
             check(login.input.activeFocus, "answer field focused");
+            expectTabCycle("echo prompt", login, pass);
+            check(card.answeringEcho && login.label === "answer:", "still answering the echo prompt after Tab");
             // Escape (Field.cancelled -> card.cancel) mid-prompt.
             const cancelsBefore = fake.cancelCount;
             card.cancel();
@@ -186,6 +220,9 @@ ShellRoot {
             }
             check(auth.lastUser !== "" && login.text === auth.lastUser, "last user prefilled");
             check(pass.input.activeFocus, "password field focused at start");
+            check(!!keys.keyClick, "QtTest TestEvent available for key events");
+            expectTabCycle("idle", pass, login);
+            pass.input.forceActiveFocus();
             switch (auth.scenario) {
             case "ok": root.runOk(); break;
             case "badpass": root.expectFailure("Authentication failure"); break;
