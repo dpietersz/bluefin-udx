@@ -341,7 +341,7 @@ Item {
         implicitHeight: Math.round(48 * u)
         color: theme.bg
         border.width: Math.max(2, Math.round(2 * u))
-        border.color: input.activeFocus ? theme.stripe1 : theme.muted
+        border.color: input.activeFocus ? theme.focus : theme.muted
 
         Text {
             id: labelText
@@ -363,7 +363,7 @@ Item {
             anchors.rightMargin: Math.round(12 * field.u)
             anchors.verticalCenter: parent.verticalCenter
             color: field.theme.fg
-            selectionColor: field.theme.stripe1
+            selectionColor: field.theme.focus
             selectedTextColor: field.theme.bg
             font.family: field.fontFamily
             font.pixelSize: Math.round(22 * field.u)

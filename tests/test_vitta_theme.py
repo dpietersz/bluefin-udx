@@ -131,6 +131,7 @@ class VittaThemeTests(unittest.TestCase):
                 "stripe3": "#d79921",
                 "stripe4": "#cc241d",
                 "muted": "#a89984",
+                "focus": "#689d6a",
                 "error": "#fb4934",
             },
         )
@@ -146,9 +147,41 @@ class VittaThemeTests(unittest.TestCase):
                 "stripe3": "#fabd2f",
                 "stripe4": "#fb4934",
                 "muted": "#7c6f64",
+                "focus": "#427b58",
                 "error": "#9d0006",
             },
         )
+
+    @staticmethod
+    def contrast(a, b):
+        """WCAG 2.x contrast ratio of two #RRGGBB colours."""
+        def luminance(colour):
+            channels = [int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+        high, low = sorted((luminance(a), luminance(b)), reverse=True)
+        return (high + 0.05) / (low + 0.05)
+
+    def test_focus_colour_reaches_3_to_1_on_bg(self):
+        """R22: the focused-input colour is a UI component indicator, so it
+        needs WCAG 1.4.11's 3:1 against the background in both modes. The
+        band colour stripe1 does not in light mode (#8ec07c on #fbf1c7)."""
+        palette = theme.load_palette(PALETTE)
+        self.assertAlmostEqual(self.contrast("#ffffff", "#000000"), 21.0)
+        self.assertLess(self.contrast(palette["light"]["stripe1"], palette["light"]["bg"]), 3)
+        for mode in ("dark", "light"):
+            colours = palette[mode]
+            ratio = self.contrast(colours["focus"], colours["bg"])
+            self.assertGreaterEqual(ratio, 3, f"{mode}: focus {colours['focus']} on {colours['bg']} is {ratio:.2f}:1")
+
+    def test_focus_colour_drives_greeter_and_lock_input_rings(self):
+        qml = (ROOT / "files/vitta/usr/share/vitta/greeter/LoginScreen.qml").read_text()
+        self.assertIn("border.color: input.activeFocus ? theme.focus : theme.muted", qml)
+        self.assertNotRegex(qml, r"(border\.color|selectionColor):.*stripe")
+        for mode in ("dark", "light"):
+            focus = theme.rgba(theme.load_palette(PALETTE)[mode]["focus"])
+            field = dict(next(props for kind, props in self.widgets(self.render(mode)) if kind == "input-field"))
+            self.assertEqual((field["outer_color"], field["check_color"]), (focus, focus), mode)
 
     def test_greeter_fallback_palette_mirrors_palette_toml(self):
         """Theme.qml keeps a built-in copy of palette.toml for when

@@ -288,6 +288,8 @@ ShellRoot {
 
     function startScenario() {
         check(pass.input.activeFocus, "password field still focused after the layout checks");
+        check(Qt.colorEqual(pass.border.color, theme.focus) && Qt.colorEqual(login.border.color, theme.muted),
+              "focused field border is theme.focus, the other theme.muted");
         expectTabCycle("idle", pass, login);
         pass.input.forceActiveFocus();
         switch (auth.scenario) {

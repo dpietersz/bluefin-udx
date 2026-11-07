@@ -16,7 +16,9 @@ DEFAULT_LONGITUDE = 4.90
 DEFAULT_CONFIG = Path("/etc/vitta/theme.conf")
 DEFAULT_PALETTE = Path("/usr/share/vitta/theme/palette.toml")
 DEFAULT_LOGO_DIR = Path("/usr/share/vitta/theme")
-PALETTE_KEYS = ("bg", "fg", "stripe1", "stripe2", "stripe3", "stripe4", "muted", "error")
+# focus: focused input borders (greeter fields, hyprlock input ring). Not a
+# band colour: light stripe1 is only 1.85:1 on bg, focus must reach 3:1 (R22).
+PALETTE_KEYS = ("bg", "fg", "stripe1", "stripe2", "stripe3", "stripe4", "muted", "focus", "error")
 ZENITH = 90.833
 
 
@@ -301,11 +303,11 @@ input-field {{
     rounding = 0
     dots_size = 0.25
     dots_spacing = 0.55
-    outer_color = {rgba(colors['stripe1'])}
+    outer_color = {rgba(colors['focus'])}
     inner_color = {rgba(colors['bg'])}
     font_color = {rgba(colors['fg'])}
     fail_color = {rgba(colors['error'])}
-    check_color = {rgba(colors['stripe1'])}
+    check_color = {rgba(colors['focus'])}
     font_family = Monaspace Neon
     fade_on_empty = true
     placeholder_text = <i>Password…</i>
