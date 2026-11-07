@@ -132,22 +132,29 @@ def render_hyprlock(colors: dict[str, str], mode: str, logo_dir: Path) -> str:
 
     Layout mirrors the greeter card (Card.qml): logo, clock, date, password,
     then a `host · vitta <version>` footer, stacked without overlap inside the
-    innermost stripe. hyprlock's `font_size` is Pango points at 96 dpi, so
+    card fill. hyprlock's `font_size` is Pango points at 96 dpi, so
     px = pt * 4/3: 54 pt is the greeter's 72 px clock, 18 pt its 24 px date,
     12 pt its 16 px footer.
     """
+    # R19: flat concentric bands, painted outermost first. Each band is a
+    # filled shape (stripe1, stripe2, stripe3, stripe4, then the card fill in
+    # bg), 5 px smaller on every side than the one beneath it, with concentric
+    # radii 24 - 5*i (24/19/14/9, card 4). No borders and no shadows: a
+    # bordered shape anti-aliases its edges against whatever is under it, and
+    # with bg-filled shapes that put a dark seam between every stripe pair,
+    # which read as a bevel. hyprlock orders widgets by zindex with an
+    # unstable sort, so the painter's order is pinned explicitly: background
+    # -10, bands -5..-1, content widgets keep the default 0 above them.
     shapes = []
-    for index, stripe in enumerate(("stripe1", "stripe2", "stripe3", "stripe4")):
-        width = 560 - index * 10
-        height = 460 - index * 10
-        rounding = max(0, 14 - index * 5)
+    for index, key in enumerate(("stripe1", "stripe2", "stripe3", "stripe4", "bg")):
         shapes.append(f"""shape {{
     monitor =
-    size = {width}, {height}
-    color = {rgba(colors['bg'])}
-    border_size = 5
-    border_color = {rgba(colors[stripe])}
-    rounding = {rounding}
+    size = {560 - index * 10}, {460 - index * 10}
+    color = {rgba(colors[key])}
+    border_size = 0
+    rounding = {24 - index * 5}
+    shadow_passes = 0
+    zindex = {index - 5}
     position = 0, 0
     halign = center
     valign = center
@@ -157,6 +164,7 @@ def render_hyprlock(colors: dict[str, str], mode: str, logo_dir: Path) -> str:
 background {{
     monitor =
     color = {rgba(colors['bg'])}
+    zindex = -10
 }}
 
 {'\n\n'.join(shapes)}

@@ -151,31 +151,63 @@ class VittaThemeTests(unittest.TestCase):
             "--palette", str(PALETTE), "--logo-dir", "/logos",
         ).stdout
         self.assertEqual(light.splitlines()[0], "# vitta-theme render hyprlock --mode light")
+        # R19: flat filled bands in painter's order (stripe1 outermost first,
+        # then stripe2..4 each inset 5 px, then the card fill in bg), no
+        # borders or shadows, concentric radii 24 - 5*i.
         shapes = re.findall(r"shape \{\n(.*?)\n\}", rendered, re.DOTALL)
-        self.assertEqual(len(shapes), 4)
+        self.assertEqual(len(shapes), 5)
         self.assertEqual(
-            [re.search(r"border_color = (rgba\([^)]*\))", shape).group(1) for shape in shapes],
-            ["rgba(689d6aff)", "rgba(ebdbb2ff)", "rgba(d65d0eff)", "rgba(cc241dff)"],
+            [re.search(r"^    color = (rgba\([^)]*\))$", shape, re.MULTILINE).group(1) for shape in shapes],
+            ["rgba(689d6aff)", "rgba(ebdbb2ff)", "rgba(d65d0eff)", "rgba(cc241dff)", "rgba(282828ff)"],
         )
         sizes = [
             tuple(map(int, re.search(r"size = (\d+), (\d+)", shape).groups()))
             for shape in shapes
         ]
+        self.assertEqual(sizes[0], (560, 460))
         self.assertTrue(all(
             previous[0] - current[0] == 10 and previous[1] - current[1] == 10
             for previous, current in zip(sizes, sizes[1:])
         ))
         self.assertEqual(
             [int(re.search(r"rounding = (\d+)", shape).group(1)) for shape in shapes],
-            [14, 9, 4, 0],
+            [24, 19, 14, 9, 4],
         )
-        self.assertTrue(all("border_size = 5" in shape for shape in shapes))
+        self.assertTrue(all("border_size = 0" in shape for shape in shapes))
+        self.assertTrue(all("shadow_passes = 0" in shape for shape in shapes))
+        self.assertNotIn("border_color", rendered)
         self.assertIn("background {\n    monitor =\n    color = rgba(282828ff)", rendered)
-        self.assertIn("color = rgba(282828ff)", shapes[-1])
         self.assertIn("font_family = Monaspace Neon", rendered)
         self.assertIn("path = /logos/logo-dark.png", rendered)
         self.assertNotIn("general {", rendered)
         self.assertNotIn("auth {", rendered)
+
+    def test_render_hyprlock_pins_painters_order_with_zindex(self):
+        """hyprlock sorts widgets by zindex with an unstable sort, so the band
+        order must not rest on file order: background < stripe1 < ... < card
+        fill < every content widget (image, input, labels keep the default 0).
+        """
+        rendered = run_cli(
+            "render", "hyprlock", "--mode", "light",
+            "--palette", str(PALETTE), "--logo-dir", "/logos",
+        ).stdout
+        def zindex(block):
+            match = re.search(r"zindex = (-?\d+)", block)
+            return int(match.group(1)) if match else None
+        background = re.findall(r"^background \{\n(.*?)\n\}", rendered, re.DOTALL | re.MULTILINE)
+        shapes = re.findall(r"^shape \{\n(.*?)\n\}", rendered, re.DOTALL | re.MULTILINE)
+        content = [
+            block
+            for kind in ("image", "input-field", "label")
+            for block in re.findall(rf"^{kind} \{{\n(.*?)\n\}}", rendered, re.DOTALL | re.MULTILINE)
+        ]
+        self.assertEqual(len(background), 1)
+        order = [zindex(background[0])] + [zindex(shape) for shape in shapes]
+        self.assertNotIn(None, order)
+        self.assertEqual(order, sorted(set(order)), "background and bands must have strictly rising zindex")
+        self.assertLess(order[-1], 0, "card fill must stay below content widgets (default zindex 0)")
+        self.assertEqual(len(content), 5)
+        self.assertTrue(all(zindex(block) is None for block in content))
 
     def render_boxes(self):
         """Return (inner card half-extents, [(kind, x0, x1, y0, y1), ...]).
