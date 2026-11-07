@@ -93,6 +93,10 @@ evolving — not freezing in old patterns.
   height (21.6 px at 1080p) and every position is a whole percent.
   - dark: aqua `#689d6a` · blue `#458588` · yellow `#d79921` · red `#cc241d`
   - light: aqua `#8ec07c` · blue `#83a598` · yellow `#fabd2f` · red `#fb4934`
+- **Focus** (R22): focused input borders on the greeter and the lock screen's
+  input ring use palette key `focus`, not a band colour, so they keep WCAG
+  3:1 against the background: dark `#689d6a` (4.65:1), light `#427b58`
+  (4.4:1; light aqua `#8ec07c` is only 1.85:1).
 - **Logo on the bands**: centred horizontally and on the band block, size
   round(0.24 × height), in a bg-coloured circle of radius 0.54 × logo size, so
   the bands end in a clean round gap around it.

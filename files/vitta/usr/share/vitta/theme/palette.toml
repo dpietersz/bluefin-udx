@@ -6,6 +6,7 @@ stripe2 = "#458588"
 stripe3 = "#d79921"
 stripe4 = "#cc241d"
 muted = "#a89984"
+focus = "#689d6a"
 error = "#fb4934"
 
 [light]
@@ -16,4 +17,5 @@ stripe2 = "#83a598"
 stripe3 = "#fabd2f"
 stripe4 = "#fb4934"
 muted = "#7c6f64"
+focus = "#427b58"
 error = "#9d0006"
