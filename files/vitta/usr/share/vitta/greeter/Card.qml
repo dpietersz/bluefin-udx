@@ -2,10 +2,9 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// The login card: four nested Gruvbox stripes (outer -> inner stripe1..4,
-// 5 px each, radii max(0, 14 - 5*i) = 14/9/4/0) around logo, clock, date,
-// login/password fields, status line and footer. Stripe geometry is fixed;
-// everything inside scales with the card width (design width 560 px).
+// The login card: four flat Gruvbox stripes (outer -> inner stripe1..4, 5 px
+// each) around logo, clock, date, login/password fields, status line and
+// footer. Everything scales with the card width (design width 560 px, u = 1).
 Item {
     id: card
 
@@ -13,8 +12,12 @@ Item {
     required property var auth
 
     readonly property real u: width / 560
-    readonly property int stripeWidth: 5
+    readonly property int stripeWidth: Math.max(1, Math.round(5 * u))
     readonly property int inset: 4 * stripeWidth
+    // Radius of the bg card fill; band i (0 = outermost) gets
+    // cardRadius + (4 - i) * stripeWidth, so all edges stay concentric:
+    // 24/19/14/9 and 4 at u = 1 (R19).
+    readonly property int cardRadius: Math.round(4 * u)
     readonly property real pad: Math.round(28 * u)
     readonly property string fontFamily: "Monaspace Neon"
     readonly property real baseSize: Math.round(22 * u)
@@ -126,16 +129,22 @@ Item {
     }
 
     // ---- stripes -----------------------------------------------------------
+    // R19: flat filled bands in painter's order — stripe1 first, then
+    // stripe2..4 each inset by one stripe width, then the card fill in bg.
+    // No borders, layers or effects. A band's anti-aliased edge therefore
+    // blends only into the opaque band beneath it; the former nested
+    // border.width outlines with transparent interiors blended every curved
+    // edge into the window background too, leaving dark seams between the
+    // stripes, and their 14/9/4/0 radii squared off the inner corners — both
+    // read as a bevelled, 3D frame.
     Repeater {
-        model: 4
+        model: 5
         Rectangle {
             required property int index
             anchors.fill: parent
             anchors.margins: index * card.stripeWidth
-            radius: Math.max(0, 14 - card.stripeWidth * index)
-            color: index === 3 ? card.theme.bg : "transparent"
-            border.width: card.stripeWidth
-            border.color: [card.theme.stripe1, card.theme.stripe2, card.theme.stripe3, card.theme.stripe4][index]
+            radius: card.cardRadius + (4 - index) * card.stripeWidth
+            color: [card.theme.stripe1, card.theme.stripe2, card.theme.stripe3, card.theme.stripe4, card.theme.bg][index]
         }
     }
 
