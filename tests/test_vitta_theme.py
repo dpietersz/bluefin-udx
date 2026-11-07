@@ -251,9 +251,9 @@ class VittaThemeTests(unittest.TestCase):
 
     def test_render_hyprlock_four_flat_full_width_bands_in_order(self):
         """Down any column away from the logo: bg, stripe1, stripe2, stripe3,
-        stripe4, bg. Each band round(0.022 H) thick (24 px at 1080p, +-1 px
-        for hyprlock rounding % sizes to pixels), block centred at 40 % of H,
-        touching, at every common height."""
+        stripe4, bg. Each band 2 % of H thick (21.6 px at 1080p, +-1 px for
+        hyprlock rounding % sizes to pixels; whole percents only, R21), block
+        centred at 40 % of H, touching, at every common height."""
         for mode in ("dark", "light"):
             colours = theme.load_palette(PALETTE)[mode]
             rendered = self.render(mode)
@@ -272,7 +272,7 @@ class VittaThemeTests(unittest.TestCase):
                 for x in (0, 40, width - 1):
                     column = self.runs(boxes, x, height)
                     self.assertEqual([run[0] for run in column], expected, (mode, width, height, x))
-                    band = round(0.022 * height)
+                    band = 0.02 * height
                     self.assertTrue(all(abs(run[2] - band) <= 1 for run in column[1:5]), (column, band))
                     centre = (column[1][1] + column[4][1] + column[4][2]) / 2
                     self.assertLessEqual(abs(centre - 0.4 * height), 1, (width, height, centre))
@@ -339,6 +339,27 @@ class VittaThemeTests(unittest.TestCase):
                         continue
                     overlap = a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
                     self.assertFalse(overlap, f"{width}x{height}: {name_a} {a} overlaps {name_b} {b}")
+
+    def test_render_hyprlock_geometry_is_whole_numbers(self):
+        """hyprlock reads `%` and numbers with the locale-sensitive std::stof:
+        under a decimal-comma LC_NUMERIC "2.2%" misparses. Every size,
+        position, rounding and other number must be an integer (R21). Only
+        the input field's dots_size/dots_spacing are inherently fractions of
+        the field height; niri-lock.sh starts hyprlock with LC_NUMERIC=C."""
+        fractional = {"dots_size", "dots_spacing"}
+        for mode in ("dark", "light"):
+            widgets = self.widgets(self.render(mode))
+            geometry = [(kind, key, value) for kind, props in widgets for key, value in props.items()
+                        if key in ("size", "position", "rounding") or key.endswith(("_size", "_thickness"))]
+            self.assertGreater(len([g for g in geometry if g[1] == "position"]), 8)
+            for kind, key, value in geometry:
+                if key not in fractional:
+                    self.assertNotRegex(value, r"\d\.\d", (mode, kind, key))
+                    self.assertRegex(value, r"^-?\d+%?(, -?\d+%?)?$", (mode, kind, key))
+            numbers = [(kind, key, value) for kind, props in widgets for key, value in props.items()
+                       if key not in fractional and not key.endswith(("text", "path"))]
+            for kind, key, value in numbers:
+                self.assertNotRegex(value, r"\d\.\d", (mode, kind, key))
 
     def test_render_hyprlock_matches_greeter_text(self):
         rendered = run_cli(

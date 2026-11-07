@@ -126,8 +126,8 @@ def rgba(color: str) -> str:
 
 # Layout A (R20), as fractions of the screen height H. Shared with the
 # greeter (files/vitta/usr/share/vitta/greeter/LoginScreen.qml).
-BAND = 0.022            # each of the four bands is round(BAND * H) thick
-BAND_CENTRE = 0.40      # band block centred at 40 % of H from the top
+# Bands: 0.022 H each on the greeter; 2 % here, see LOCK_BAND_PERCENT.
+BAND_CENTRE_PERCENT = 40  # band block centred at 40 % of H from the top
 LOGO = 0.24             # logo size
 GAP = 0.54              # radius of the bg gap circle, x logo size
 GAP_MARGIN = 0.03       # gap circle -> date, password field -> host line
@@ -139,14 +139,24 @@ CLOCK_DATE_SPACING = 0.01
 # screen's widget sizes are computed for this reference height; the bands
 # and every position are % of the screen and so follow any resolution.
 REFERENCE_HEIGHT = 1080
+# hyprlock parses `%` values with std::stof, which reads the decimal
+# separator from LC_NUMERIC: under nl_NL "2.2%" stops at the dot and the
+# layout falls apart. So every size and position the fragment emits is an
+# integer (R21). The bands are stacked shapes (see render_hyprlock) whose
+# centres must then be whole percents too, which needs an even thickness:
+# 2 % of H (21.6 px at 1080p) is the closest to the greeter's 0.022 H (24 px).
+LOCK_BAND_PERCENT = 2
 # The greeter's fields and small text scale with u = H / 800 (LoginScreen.qml).
 FORM_U = REFERENCE_HEIGHT / 800
 LABEL_LINE = 1.3        # assumed label box height, x pixel size
 
 
 def percent(value: float) -> str:
-    """Format a fraction of the screen as a hyprlock % layout value."""
-    return f"{round(value * 100, 4):g}%"
+    """Format a fraction of the screen as a whole-number hyprlock % value.
+
+    Whole numbers only: hyprlock's std::stof is locale-sensitive (R21).
+    """
+    return f"{round(value * 100)}%"
 
 
 def points(pixels: float) -> int:
@@ -159,10 +169,11 @@ def hyprlock_layout() -> dict[str, float | int | str]:
 
     Positions are offsets of each widget's centre from the screen centre, y
     up (hyprlock's halign/valign center convention), as fractions of H;
-    sizes are px at REFERENCE_HEIGHT.
+    sizes are px at REFERENCE_HEIGHT. render_hyprlock rounds every
+    position to a whole percent.
     """
     h = REFERENCE_HEIGHT
-    band_up = 0.5 - BAND_CENTRE                   # band block centre, y up
+    band_up = (50 - BAND_CENTRE_PERCENT) / 100     # band block centre, y up
     logo = round(LOGO * h)
     gap_radius = round(GAP * logo)
     clock_pt, date_pt, host_pt = points(CLOCK * h), points(DATE * h), points(16 * FORM_U)
@@ -207,18 +218,22 @@ def render_hyprlock(colors: dict[str, str], mode: str, logo_dir: Path) -> str:
     # edge: rounding a band's %-size to whole pixels can then shift a
     # boundary by a pixel but never open a bg-coloured seam between bands.
     shapes = []
+    # In whole percents: band i spans from 2 * LOCK_BAND_PERCENT * (2 - i)
+    # above the block centre down to 2 * LOCK_BAND_PERCENT below it; with an
+    # even band thickness its centre is a whole percent too.
+    band_up = 50 - BAND_CENTRE_PERCENT
     for index, key in enumerate(("stripe1", "stripe2", "stripe3", "stripe4")):
-        height = (4 - index) * BAND
-        centre = g["band_up"] - 2 * BAND + height / 2
+        height = (4 - index) * LOCK_BAND_PERCENT
+        centre = band_up - 2 * LOCK_BAND_PERCENT + height // 2
         shapes.append(f"""shape {{
     monitor =
-    size = 100%, {percent(height)}
+    size = 100%, {height}%
     color = {rgba(colors[key])}
     border_size = 0
     rounding = 0
     shadow_passes = 0
     zindex = {index - 5}
-    position = 0, {percent(centre)}
+    position = 0, {centre}%
     halign = center
     valign = center
 }}""")
