@@ -20,18 +20,31 @@ What: for every account in /usr/lib/passwd with password `x` that is neither
 in /etc/passwd nor in /etc/shadow, append `name:!*:::::::` (locked, no
 aging), the entry the image's own /etc/shadow carries for such accounts.
 Existing lines are never touched. Takes the same lock as lckpwdf(3).
+
+How: /etc/shadow is replaced atomically, never edited in place, so a crash,
+power cut or full disk leaves either the old or the new file, never a
+truncated one that would lock everybody out. The new copy is written to a
+temporary file in /etc that already carries the original's owner, mode
+(0000) and SELinux label (shadow_t; a file created in /etc would otherwise
+get etc_t and pam_unix/unix_chkpwd could no longer read it), fsynced, renamed
+over /etc/shadow, and /etc is fsynced so the rename itself is durable.
 Ordered after systemd-sysusers.service (vitta-shadow-sync.service);
 bootc-sysusers-shadow-sync.service removes the orphaned entries again if an
 account later disappears.
 """
+import errno
 import fcntl
+import glob
 import os
 import sys
+import tempfile
 
 IMAGE_PASSWD = "/usr/lib/passwd"
 LOCAL_PASSWD = "/etc/passwd"
 SHADOW = "/etc/shadow"
 LOCK = "/etc/.pwd.lock"
+SELINUX_XATTR = "security.selinux"
+TEMP_PREFIX = ".shadow.vitta-"
 
 
 def names(path, shadowed_only=False):
@@ -41,6 +54,57 @@ def names(path, shadowed_only=False):
     except FileNotFoundError:
         return []
     return [row[0] for row in rows if not shadowed_only or (len(row) > 1 and row[1] == "x")]
+
+
+def selinux_label(path):
+    """Return path's SELinux label, or None where labels are unsupported."""
+    try:
+        return os.getxattr(path, SELINUX_XATTR, follow_symlinks=False)
+    except OSError as error:
+        if error.errno in (errno.ENODATA, errno.ENOTSUP):
+            return None
+        raise
+
+
+def write_all(fd, data):
+    """os.write may write less than asked; loop until everything is out."""
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view):]
+
+
+def replace(path, data):
+    """Atomically replace path with data, keeping owner, mode and label.
+
+    Any failure before the rename removes the temporary copy and leaves path
+    untouched. Call with the shadow lock held.
+    """
+    directory = os.path.dirname(path)
+    original = os.stat(path, follow_symlinks=False)
+    label = selinux_label(path)
+    fd, temporary = tempfile.mkstemp(prefix=TEMP_PREFIX, dir=directory)
+    try:
+        # Owner, mode and label first, so the hashes never sit in a file
+        # anyone else could read or that SELinux labels etc_t.
+        os.fchown(fd, original.st_uid, original.st_gid)
+        os.fchmod(fd, original.st_mode & 0o7777)
+        if label is not None and selinux_label(temporary) != label:
+            os.setxattr(fd, SELINUX_XATTR, label)
+        write_all(fd, data)
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.rename(temporary, path)
+    except BaseException:
+        if fd >= 0:
+            os.close(fd)
+        os.unlink(temporary)
+        raise
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def main():
@@ -53,6 +117,9 @@ def main():
     lock = os.open(LOCK, os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, 0o600)
     try:
         fcntl.lockf(lock, fcntl.LOCK_EX)
+        # A power cut between mkstemp and rename can leave a copy behind.
+        for stale in glob.glob(os.path.join(os.path.dirname(SHADOW), glob.escape(TEMP_PREFIX) + "*")):
+            os.unlink(stale)
         local = set(names(LOCAL_PASSWD))
         with open(SHADOW, encoding="utf-8") as file:
             content = file.read()
@@ -63,13 +130,11 @@ def main():
         lines = "".join(f"{name}:!*:::::::\n" for name in missing)
         if content and not content.endswith("\n"):
             lines = "\n" + lines
-        # Append in place: keeps the file's inode, mode 0000 and shadow_t label.
-        shadow = os.open(SHADOW, os.O_WRONLY | os.O_APPEND | os.O_CLOEXEC)
         try:
-            os.write(shadow, lines.encode())
-            os.fsync(shadow)
-        finally:
-            os.close(shadow)
+            replace(SHADOW, (content + lines).encode())
+        except OSError as error:
+            print(f"vitta-shadow-sync: {SHADOW} left unchanged: {error}", file=sys.stderr)
+            return 1
         print("vitta-shadow-sync: added locked shadow entries for: " + " ".join(missing))
         return 0
     finally:
