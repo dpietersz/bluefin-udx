@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Vitta
+Description=Vitta boot splash: Gruvbox bands grow towards the Fedora + Lenovo badge with boot progress
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/vitta
+ScriptFile=/usr/share/plymouth/themes/vitta/vitta.script
