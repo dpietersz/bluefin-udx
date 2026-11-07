@@ -85,14 +85,15 @@ At the switch reboot, enter the normal LUKS passphrase. The stock prompt must un
 
 ### 2. Greeter, login, and keyring
 
-At the greeter, compare its palette with the currently selected mode. Boot once docked (laptop plus external monitor) and once undocked: the login card must sit whole and centred on one screen, never straddling the seam. Log in, then confirm the login keyring is unlocked. Open Teams and Storage Explorer; neither may request a separate keyring password.
+At the greeter, compare its palette with the currently selected mode; the four stripes must look flat (no bevel or shadow) with rounded, concentric corners. Boot once docked (laptop plus external monitor) and once undocked: the login card must sit whole and centred on one screen, never straddling the seam. Type the user name and press `Tab`: focus must move to the password field (`Shift+Tab` goes back). Log in, then confirm the login keyring is unlocked and the greeter's user manager started. Open Teams and Storage Explorer; neither may request a separate keyring password.
 
 ```bash
 vitta-theme mode
 busctl --user get-property org.freedesktop.secrets /org/freedesktop/secrets/collection/login org.freedesktop.Secret.Collection Locked
+journalctl -b -u vitta-shadow-sync -u "user@$(id -u greetd).service" --no-pager
 ```
 
-Expected: the greeter matches the reported `light` or `dark` mode, login succeeds, and `busctl` returns `b false`.
+Expected: the greeter matches the reported `light` or `dark` mode, login succeeds, `busctl` returns `b false`, and the journal shows `Started user@<greetd uid>.service` with no `PAM failed` line. On the first boot after this fix, `vitta-shadow-sync` logs the accounts it gave a locked shadow entry (`greetd` at least).
 
 > **Result:** [ ] Pass  [ ] Fail
 >
