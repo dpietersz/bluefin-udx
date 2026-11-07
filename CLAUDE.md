@@ -87,11 +87,13 @@ files/
     usr/lib/environment.d/50-electron-keyring.conf  # Forces :GNOME into XDG_CURRENT_DESKTOP for Electron keyring detection
     usr/lib/pki/containers/{bluefin-udx,bluefin-udx-nvidia}.pub  # cosign pubkeys baked into image
     usr/share/wayland-sessions/niri.desktop      # Override DesktopNames=niri → niri;GNOME for Electron password-store detection
-  vitta/                  # Vitta-only overlay (greeter, theme, repos, services)
+  vitta/                  # Vitta-only overlay (greeter, theme, Plymouth splash, repos, services)
 scripts/
   local-build-test.sh     # Local mirror of the CI smoke-boot gate (Phase checks live in here)
   check-fedora-next.sh    # Resolves bluefin and Vitta recipe sets via RECIPES/BASE_IMAGE env
   vitta-gap-report.sh     # Compares Bluefin DX and base-main package/integration-file gaps
+  vitta-bootsplash-assets.py   # Pre-renders the Vitta Plymouth theme images (needs Pillow)
+  vitta-bootsplash-preview.sh  # Renders the Vitta splash with the real plymouthd in Xvfb (container, never the host VT)
 tests/                    # Regression tests, including Vitta theme and group reconciliation
 cosign.pub                # Public key matching cosign.key (cosign.key is the signing secret, gitignored in spirit)
 .github/workflows/build.yml   # Nightly + on-push build/sign/push pipeline
@@ -116,6 +118,10 @@ podman rm "$CID"
 ./scripts/check-fedora-next.sh 45
 RECIPES="recipes/common.yml recipes/vitta.yml recipes/vitta-modules.yml" \
   BASE_IMAGE=ghcr.io/ublue-os/base-main ./scripts/check-fedora-next.sh
+
+# Render the Vitta boot splash offscreen (stock plymouthd + x11 renderer in Xvfb,
+# rootless container without devices) -> ./bootsplash-preview/*.png
+./scripts/vitta-bootsplash-preview.sh
 
 # Verify a signed image manually (cosign.pub is the same key baked at /usr/lib/pki/containers/)
 cosign verify --key cosign.pub ghcr.io/dpietersz/bluefin-udx-nvidia:stable
