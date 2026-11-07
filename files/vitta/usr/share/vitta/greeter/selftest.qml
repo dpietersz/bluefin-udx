@@ -3,7 +3,7 @@ import QtTest
 import Quickshell
 
 // Noninteractive behaviour test for the greeter: the real Theme, Auth and
-// Card wired as in shell.qml, driven against the preview backend with a
+// LoginScreen wired as in shell.qml, driven against the preview backend with a
 // scripted submit. Run it via `vitta-greeter-preview --selftest`, which sets
 // VITTA_GREETER_PREVIEW=1, the scenario and an offscreen platform, and turns
 // the printed "SELFTEST RESULT" line into the exit status.
@@ -32,10 +32,9 @@ ShellRoot {
         implicitHeight: 800
         color: theme.bg
 
-        Card {
+        LoginScreen {
             id: card
-            anchors.centerIn: parent
-            width: Math.min(560, Math.round(0.4 * window.width))
+            anchors.fill: parent
             theme: theme
             auth: auth
         }
@@ -208,8 +207,102 @@ ShellRoot {
         });
     }
 
+    // R20 layout A at the current window size: four touching full-width
+    // bands of round(0.022 h), the block centred at 40 % of the height, the
+    // logo (round(0.24 h)) centred on it in a bg circle of radius 0.54 x logo
+    // painted between bands and logo, and clock, date, fields, status,
+    // footer and power buttons inside the screen, clear of the bands, the
+    // gap and each other.
+    function box(item) {
+        const p = item.mapToItem(card, 0, 0);
+        return { x0: p.x, y0: p.y, x1: p.x + item.width, y1: p.y + item.height };
+    }
+
+    function overlaps(a, b) {
+        return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+    }
+
+    function checkLayout() {
+        card.bandBlock.forceLayout();
+        card.form.forceLayout();
+        const w = card.width, h = card.height;
+        const tag = "layout " + w + "x" + h + ": ";
+        const band = Math.round(0.022 * h);
+        const centre = Math.round(0.4 * h);
+        const rows = Array.from(card.bandBlock.children)
+            .filter(c => c.color !== undefined)
+            .map(c => box(c));
+        const colours = Array.from(card.bandBlock.children)
+            .filter(c => c.color !== undefined)
+            .map(c => c.color);
+        check(rows.length === 4, tag + "four bands");
+        check(rows.every(r => r.x0 === 0 && r.x1 === w), tag + "bands run edge to edge");
+        check(rows.every(r => r.y1 - r.y0 === band), tag + "each band is round(0.022 h) = " + band + " px");
+        check(rows.every((r, i) => i === 0 || r.y0 === rows[i - 1].y1), tag + "bands touch, top to bottom");
+        check(rows.length === 4 && (rows[0].y0 + rows[3].y1) / 2 === centre,
+              tag + "band block centred at 40 % (y " + centre + ")");
+        check(colours.length === 4 && [theme.stripe1, theme.stripe2, theme.stripe3, theme.stripe4]
+              .every((c, i) => Qt.colorEqual(colours[i], c)), tag + "bands are stripe1..4");
+        const logo = box(card.logo), gap = box(card.logoGap);
+        const logoSize = Math.round(0.24 * h);
+        check(card.logo.width === logoSize && card.logo.height === logoSize, tag + "logo is round(0.24 h) = " + logoSize + " px");
+        check(Math.abs((logo.x0 + logo.x1) / 2 - w / 2) <= 1 && Math.abs((logo.y0 + logo.y1) / 2 - centre) <= 1,
+              tag + "logo centred horizontally and on the band block");
+        check(card.logoGap.width === 2 * Math.round(0.54 * logoSize) && card.logoGap.radius === card.logoGap.width / 2
+              && Qt.colorEqual(card.logoGap.color, theme.bg), tag + "bg gap circle of radius 0.54 x logo");
+        check(Math.abs((gap.x0 + gap.x1) / 2 - (logo.x0 + logo.x1) / 2) <= 1
+              && Math.abs((gap.y0 + gap.y1) / 2 - (logo.y0 + logo.y1) / 2) <= 1, tag + "gap circle concentric with the logo");
+        const order = [card.bandBlock, card.logoGap, card.logo].map(i => card.children.indexOf(i));
+        check(order[0] >= 0 && order[0] < order[1] && order[1] < order[2], tag + "painted bands, then gap, then logo");
+        const items = {
+            clock: card.clockLabel, date: card.dateLabel, bands: card.bandBlock, gap: card.logoGap,
+            login: login, password: pass, status: card.statusLabel, footer: card.footerLabel,
+            power: card.powerButtons
+        };
+        const names = Object.keys(items);
+        const boxes = names.map(n => box(items[n]));
+        boxes.forEach((b, i) => check(b.x0 >= 0 && b.y0 >= 0 && b.x1 <= w && b.y1 <= h, tag + names[i] + " inside the screen"));
+        for (let i = 0; i < names.length; i++) {
+            for (let j = i + 1; j < names.length; j++) {
+                // The bands run into the gap circle by design (R20).
+                if (names[i] === "bands" && names[j] === "gap") continue;
+                check(!overlaps(boxes[i], boxes[j]), tag + names[i] + " clear of " + names[j]);
+            }
+        }
+        check(logo.x0 >= gap.x0 && logo.x1 <= gap.x1 && logo.y0 >= gap.y0 && logo.y1 <= gap.y1, tag + "logo inside its gap");
+    }
+
+    // Check the layout at common screen sizes. The offscreen window does not
+    // follow implicitWidth/Height once shown, so the screen item is detached
+    // from it, sized directly, and re-anchored afterwards.
+    function checkLayouts(sizes) {
+        card.anchors.fill = undefined;
+        for (const size of sizes) {
+            card.width = size[0];
+            card.height = size[1];
+            checkLayout();
+        }
+        card.anchors.fill = card.parent;
+        check(card.width === window.width && card.height === window.height, "screen fills the window again");
+    }
+
+    function startScenario() {
+        check(pass.input.activeFocus, "password field still focused after the layout checks");
+        expectTabCycle("idle", pass, login);
+        pass.input.forceActiveFocus();
+        switch (auth.scenario) {
+        case "ok": root.runOk(); break;
+        case "badpass": root.expectFailure("Authentication failure"); break;
+        case "error": root.expectFailure("preview: greetd could not start the session"); break;
+        case "multiprompt": root.runMultiprompt(); break;
+        default:
+            root.check(false, "unknown scenario");
+            root.finish();
+        }
+    }
+
     Timer {
-        // Let Card.onCompleted prefill and focus first.
+        // Let LoginScreen.onCompleted prefill and focus first.
         interval: 300
         running: true
         onTriggered: {
@@ -221,17 +314,9 @@ ShellRoot {
             check(auth.lastUser !== "" && login.text === auth.lastUser, "last user prefilled");
             check(pass.input.activeFocus, "password field focused at start");
             check(!!keys.keyClick, "QtTest TestEvent available for key events");
-            expectTabCycle("idle", pass, login);
-            pass.input.forceActiveFocus();
-            switch (auth.scenario) {
-            case "ok": root.runOk(); break;
-            case "badpass": root.expectFailure("Authentication failure"); break;
-            case "error": root.expectFailure("preview: greetd could not start the session"); break;
-            case "multiprompt": root.runMultiprompt(); break;
-            default:
-                root.check(false, "unknown scenario");
-                root.finish();
-            }
+            root.checkLayout();
+            root.checkLayouts([[1920, 1080], [1366, 768], [2560, 1440], [1280, 1024], [3840, 2160]]);
+            root.startScenario();
         }
     }
 }
