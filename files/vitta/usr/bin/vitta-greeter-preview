@@ -7,13 +7,14 @@
 #   --mode      pin the palette (default: whatever `vitta-theme mode` says)
 #   --scenario  fake greetd behaviour (default: ok)
 #   --selftest  no window: run selftest.qml offscreen for the scenario (default:
-#               all four), print its checks, exit non-zero if any check fails
+#               all four, then the edge-to-edge check inside headless cage with
+#               the launcher's cage flags), exit non-zero if any check fails
 # VITTA_ROOT=<dir> runs the QML from <dir>/usr/share/vitta/greeter instead of
 # the installed copy, e.g. VITTA_ROOT=$PWD/files/vitta from the repo.
 set -euo pipefail
 
 usage() {
-    sed -n "6,12p" "$0" | sed "s/^# \{0,1\}//"
+    sed -n "6,13p" "$0" | sed "s/^# \{0,1\}//"
     exit "${1:-0}"
 }
 
@@ -60,24 +61,48 @@ if [ "$SELFTEST" != 1 ]; then
     exit
 fi
 
-# Selftest: headless, one quickshell run per scenario. A scenario passes only
-# if it reports PASS and Quickshell logged no QML errors.
+# Selftest: headless, one quickshell run per scenario.
 if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -w "${XDG_RUNTIME_DIR:-/nonexistent}" ]; then
     export XDG_RUNTIME_DIR="$STATE_DIR/runtime"
     mkdir -p -m 700 "$XDG_RUNTIME_DIR"
 fi
 MODE="${MODE:-dark}"
 RC=0
-for S in ${SCENARIO:-ok badpass multiprompt error}; do
-    LOG=$(run_greeter "$S" QT_QPA_PLATFORM=offscreen timeout 30 quickshell -p "$SHELL_QML" 2>&1 || true)
-    printf "%s\n" "$LOG" | grep -o "SELFTEST .*" || true
-    BAD=$(printf "%s\n" "$LOG" | grep -E "ERROR|Error:|TypeError|ReferenceError|is not a type|Cannot assign|Unable to assign|not installed|failed to load" || true)
-    if printf "%s\n" "$LOG" | grep -q "SELFTEST RESULT PASS $S " && [ -z "$BAD" ]; then
-        echo "vitta-greeter-preview: selftest $S passed"
+
+# judge NAME SCENARIO LOG: NAME passes only if LOG reports a PASS for SCENARIO
+# and Quickshell logged no QML errors. cage's own log lines ("00:00:00.012 [ERROR]
+# [xwayland/...]") are not QML errors and are left out of that scan.
+judge() {
+    printf "%s\n" "$3" | grep -o "SELFTEST .*" || true
+    BAD=$(printf "%s\n" "$3" | grep -Ev "^[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3} \[" \
+        | grep -E "ERROR|Error:|TypeError|ReferenceError|is not a type|Cannot assign|Unable to assign|not installed|failed to load" || true)
+    if printf "%s\n" "$3" | grep -q "SELFTEST RESULT PASS $2 " && [ -z "$BAD" ]; then
+        echo "vitta-greeter-preview: selftest $1 passed"
     else
-        echo "vitta-greeter-preview: selftest $S FAILED" >&2
+        echo "vitta-greeter-preview: selftest $1 FAILED" >&2
         [ -n "$BAD" ] && printf "%s\n" "$BAD" | sed "s/^/    /" >&2
         RC=1
     fi
+}
+
+for S in ${SCENARIO:-ok badpass multiprompt error}; do
+    judge "$S" "$S" "$(run_greeter "$S" QT_QPA_PLATFORM=offscreen timeout 30 quickshell -p "$SHELL_QML" 2>&1 || true)"
 done
+
+# Edge to edge: rerun the greeter inside headless cage started with the
+# launcher's own flags. Without -d cage tells Qt to draw its own decoration,
+# and the white frame shrinks the window inside the output (T580, round 2).
+if [ -z "$SCENARIO" ]; then
+    LAUNCHER="${VITTA_ROOT:-}/usr/libexec/vitta/vitta-greeter"
+    CAGE_FLAGS=$(sed -n "s/^exec cage \(.*\) -- quickshell .*/\1/p" "$LAUNCHER" 2>/dev/null || true)
+    if [ -z "$CAGE_FLAGS" ] || ! command -v cage >/dev/null; then
+        echo "vitta-greeter-preview: selftest cage FAILED: needs cage and an \"exec cage ... -- quickshell\" line in $LAUNCHER" >&2
+        RC=1
+    else
+        echo "vitta-greeter-preview: cage $CAGE_FLAGS (from $LAUNCHER)"
+        # shellcheck disable=SC2086 # CAGE_FLAGS is the launcher's word list
+        judge cage ok "$(run_greeter ok VITTA_GREETER_SELFTEST_CAGE=1 WLR_BACKENDS=headless WLR_RENDERER=pixman \
+            QT_QPA_PLATFORM=wayland QT_QUICK_BACKEND=software timeout 30 cage $CAGE_FLAGS -- quickshell -p "$SHELL_QML" 2>&1 || true)"
+    fi
+fi
 exit "$RC"

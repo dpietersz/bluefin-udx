@@ -37,7 +37,28 @@ class VittaOverlayTests(unittest.TestCase):
         # cage's default -m extend spans every monitor: a docked laptop would
         # centre the login card on the seam between screens.
         script = (VITTA / "usr/libexec/vitta/vitta-greeter").read_text()
-        self.assertRegex(script, r"(?m)^exec cage -s -m last -- quickshell ")
+        self.assertRegex(script, r"(?m)^exec cage -d -s -m last -- quickshell ")
+
+    def test_greeter_cage_tells_clients_not_to_decorate(self):
+        # Without -d cage answers xdg-decoration with client_side, so Qt draws
+        # its bradient frame: a white title bar and 3 px white edges around the
+        # greeter (T580 acceptance round 2).
+        script = (VITTA / "usr/libexec/vitta/vitta-greeter").read_text()
+        cage = re.search(r"(?m)^exec cage (.*) -- quickshell ", script)
+        self.assertIsNotNone(cage)
+        self.assertIn("-d", cage.group(1).split())
+        self.assertNotIn("QT_WAYLAND_DISABLE_WINDOWDECORATION", script)
+
+    def test_greeter_selftest_checks_edges_under_the_launchers_cage(self):
+        # The selftest reruns the greeter inside headless cage with the
+        # launcher's own flags and checks the window covers the whole output.
+        preview = (VITTA / "usr/bin/vitta-greeter-preview").read_text()
+        selftest = (VITTA / "usr/share/vitta/greeter/selftest.qml").read_text()
+        self.assertIn("usr/libexec/vitta/vitta-greeter", preview)
+        self.assertIn("WLR_BACKENDS=headless", preview)
+        self.assertIn("VITTA_GREETER_SELFTEST_CAGE=1", preview)
+        self.assertIn('Quickshell.env("VITTA_GREETER_SELFTEST_CAGE")', selftest)
+        self.assertIn("window.screen.width", selftest)
 
     def test_tmpfiles_recreates_greeter_portal_mask(self):
         # greetd's %post mask lives in the image /var, which a rebase never applies.

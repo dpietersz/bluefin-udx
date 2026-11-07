@@ -4,6 +4,9 @@
 # Wayland output; -s keeps VT switching available for recovery. -m last puts
 # the greeter on one output only: the default (-m extend) spans every
 # connected monitor, which on a docked laptop centres the card on the seam.
+# -d makes cage answer xdg-decoration with server_side (it draws none): by
+# default it tells clients to decorate themselves, and Qt then frames the
+# greeter in its white title bar and 3 px edges inside the output.
 set -euo pipefail
 
 # greetd hands the greeter a minimal environment; Theme.qml resolves
@@ -17,4 +20,4 @@ export XDG_CONFIG_HOME="$GREETD_HOME/.config"
 export XDG_CACHE_HOME="$GREETD_HOME/.cache"
 export XDG_STATE_HOME="$GREETD_HOME/.local/state"
 
-exec cage -s -m last -- quickshell -p /usr/share/vitta/greeter/shell.qml
+exec cage -d -s -m last -- quickshell -p /usr/share/vitta/greeter/shell.qml

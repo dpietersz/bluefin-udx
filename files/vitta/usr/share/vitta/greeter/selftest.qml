@@ -20,6 +20,9 @@ ShellRoot {
     ]
 
     property int failures: 0
+    // Set by vitta-greeter-preview --selftest for its run inside headless cage
+    // with the launcher's flags: only the edge-to-edge checks, no scenario.
+    readonly property bool cageCheck: String(Quickshell.env("VITTA_GREETER_SELFTEST_CAGE") || "") === "1"
     property var pending: null   // { cond, what, next, deadline }
 
     Theme { id: theme }
@@ -286,6 +289,31 @@ ShellRoot {
         check(card.width === window.width && card.height === window.height, "screen fills the window again");
     }
 
+    // Under cage the window must cover the whole output, and the screen the
+    // whole window. A client-side decoration (Qt's bradient, drawn when cage
+    // answers xdg-decoration with client_side) takes its frame out of the
+    // output: the window shrinks by 6x33 and white edges show around it.
+    function coversOutput() {
+        return !!window.screen && window.width === window.screen.width && window.height === window.screen.height;
+    }
+
+    Timer {
+        id: cagePoll
+        property real deadline: 0
+        interval: 25
+        repeat: true
+        onTriggered: {
+            if (!root.coversOutput() && Date.now() < deadline) return;
+            stop();
+            const s = window.screen;
+            root.check(root.coversOutput(), "cage: window " + window.width + "x" + window.height
+                       + " covers the whole output " + (s ? s.width + "x" + s.height : "(no screen)"));
+            root.check(card.width === window.width && card.height === window.height, "cage: screen fills the window");
+            root.check(Qt.colorEqual(window.color, theme.bg), "cage: window background is theme.bg");
+            root.finish();
+        }
+    }
+
     function startScenario() {
         check(pass.input.activeFocus, "password field still focused after the layout checks");
         check(Qt.colorEqual(pass.border.color, theme.focus) && Qt.colorEqual(login.border.color, theme.muted),
@@ -311,6 +339,11 @@ ShellRoot {
             if (!auth.preview) {
                 console.warn("SELFTEST FAIL refusing to run without VITTA_GREETER_PREVIEW=1");
                 Qt.quit();
+                return;
+            }
+            if (root.cageCheck) {
+                cagePoll.deadline = Date.now() + 3000;
+                cagePoll.start();
                 return;
             }
             check(auth.lastUser !== "" && login.text === auth.lastUser, "last user prefilled");
