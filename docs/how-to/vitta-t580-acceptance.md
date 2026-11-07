@@ -85,7 +85,7 @@ At the switch reboot, enter the normal LUKS passphrase. The stock prompt must un
 
 ### 2. Greeter, login, and keyring
 
-At the greeter, compare its palette with the currently selected mode; the four stripes must look flat (no bevel or shadow) with rounded, concentric corners. Boot once docked (laptop plus external monitor) and once undocked: the login card must sit whole and centred on one screen, never straddling the seam. Type the user name and press `Tab`: focus must move to the password field (`Shift+Tab` goes back). Log in, then confirm the login keyring is unlocked and the greeter's user manager started. Open Teams and Storage Explorer; neither may request a separate keyring password.
+At the greeter, compare its palette with the currently selected mode and with layout A (`docs/superpowers/specs/assets/vitta-login-layout-a.png`): there is no card or frame; four flat, touching bands (no bevel, shadow or gradient) run edge to edge across the screen a little above the middle, and the logo sits centred on them in a clean round gap. The clock and date are above the bands, the login and password fields and the `host · vitta <version>` line below; nothing overlaps the bands or the logo gap. Boot once docked (laptop plus external monitor) and once undocked: the login screen must fill exactly one screen, never straddling the seam. Type the user name and press `Tab`: focus must move to the password field (`Shift+Tab` goes back). Log in, then confirm the login keyring is unlocked and the greeter's user manager started. Open Teams and Storage Explorer; neither may request a separate keyring password.
 
 ```bash
 vitta-theme mode
@@ -119,7 +119,7 @@ Expected: `Type=wayland`; `XDG_CURRENT_DESKTOP` contains `GNOME`; Chezmoi report
 
 ### 4. Lock screen in both modes
 
-Test once while `vitta-theme mode` reports `light` and once while it reports `dark`. `vitta-theme mode --at` only evaluates a hypothetical time and cannot control Hyprlock, so use the live mode for each lock. Lock with the command below (or `Ctrl+Alt+L`), verify the four-stripe Vitta look, and unlock with the account password. While locked, photograph the screen (hyprlock blocks screenshots) and check that the logo, clock, date, password field and `host · vitta <version>` footer do not overlap and match the greeter's clock and date.
+Test once while `vitta-theme mode` reports `light` and once while it reports `dark`. `vitta-theme mode --at` only evaluates a hypothetical time and cannot control Hyprlock, so use the live mode for each lock. Lock with the command below (or `Ctrl+Alt+L`), verify it has the greeter's layout A look (four full-width bands, logo in a round gap on them, clock and date above, password field and host line below), and unlock with the account password. While locked, photograph the screen (hyprlock blocks screenshots) and check that the clock, date, bands, logo, password field and `host · vitta <version>` footer do not overlap (only the bands run into the logo gap), that the bands reach both screen edges, and that the clock and date match the greeter's.
 
 ```bash
 vitta-theme mode
