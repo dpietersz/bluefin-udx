@@ -4,7 +4,7 @@ import Quickshell.Io
 import Quickshell.Services.Greetd
 
 // greetd login state machine plus the other side effects the greeter has
-// (last-user file, poweroff/reboot). The UI (Card.qml) only talks to this
+// (last-user file, poweroff/reboot). The UI (LoginScreen.qml) only talks to this
 // object. VITTA_GREETER_PREVIEW=1 swaps the greetd backend for `fake` below,
 // driven by VITTA_GREETER_SCENARIO={ok,badpass,multiprompt,error}, and turns
 // power actions into status messages; everything else is the same code.

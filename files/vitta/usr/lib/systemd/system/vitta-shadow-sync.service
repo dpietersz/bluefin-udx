@@ -1,0 +1,20 @@
+# Give image system accounts (greetd, ...) a locked /etc/shadow entry before
+# anyone can log in, so pam_unix in the systemd-user PAM stack accepts
+# user@<greetd uid>.service. See /usr/libexec/vitta/vitta-shadow-sync for why
+# rebased machines with layered packages lack those entries.
+[Unit]
+Description=Add locked /etc/shadow entries for image system accounts
+Documentation=file:/usr/libexec/vitta/vitta-shadow-sync
+DefaultDependencies=no
+After=systemd-remount-fs.service systemd-sysusers.service
+Before=sysinit.target systemd-user-sessions.service shutdown.target
+Conflicts=shutdown.target
+ConditionPathIsReadWrite=/etc
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/vitta/vitta-shadow-sync
+
+[Install]
+WantedBy=sysinit.target

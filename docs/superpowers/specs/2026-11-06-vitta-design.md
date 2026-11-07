@@ -30,7 +30,7 @@ evolving — not freezing in old patterns.
    full current niri desktop + dotfiles on the **ThinkPad T580**.
 2. Every capability the audit showed in use keeps working (see §6 checklist).
 3. Retro Gruvbox **login screen and lock screen** sharing one
-   visual language: four rounded stripes (aqua · cream · orange · red),
+   visual language: four flat full-width bands (aqua · blue · yellow · red),
    Monaspace Neon, a grungy Fedora-style personal logo.
 4. Login + lock screens switch **light by day / dark by night** using one rule.
 5. Own identity (`ID=vitta`) so dotfiles stop keying on "Bluefin".
@@ -83,10 +83,17 @@ evolving — not freezing in old patterns.
 `tuna-os/remora` in the bootc ecosystem.)
 
 ### 5.4 Visual language
-- **Stripes**, outer → inner, ~5 px each, outer corner radius ~14 px:
-  - dark: aqua `#689d6a` · cream `#ebdbb2` · orange `#d65d0e` · red `#cc241d`
-  - light: `#427b58` · `#3c3836` · `#af3a03` · `#9d0006`
-    (rule: stripe 2 is always the theme foreground, so it stays visible)
+- **Bands** (layout A, owner ruling R20, mockup
+  `assets/vitta-login-layout-a.png`): no card, no frame. Four touching, flat
+  (no strokes, shadows or gradients) horizontal bands span the whole screen
+  edge to edge, top to bottom `stripe1`..`stripe4`, each round(0.022 × screen
+  height) thick (16 px at 720p, 24 px at 1080p), the block centred at 40 % of
+  the height.
+  - dark: aqua `#689d6a` · blue `#458588` · yellow `#d79921` · red `#cc241d`
+  - light: aqua `#8ec07c` · blue `#83a598` · yellow `#fabd2f` · red `#fb4934`
+- **Logo on the bands**: centred horizontally and on the band block, size
+  round(0.24 × height), in a bg-coloured circle of radius 0.54 × logo size, so
+  the bands end in a clean round gap around it.
 - **Background**: dark `#282828`, light `#fbf1c7`. Plain, like the reference.
 - **Font**: Monaspace Neon (larger than terminal default; clock much larger),
   installed **system-wide** because the greeter and initramfs run without user
@@ -96,8 +103,13 @@ evolving — not freezing in old patterns.
   palette. Two variants: cream-dominant on `#282828`, dark-brown-dominant on
   `#fbf1c7`, each rendered on its exact background colour. Generated with the
   image tool; **owner approves drafts before they ship**.
-- **Card layout** (login & lock): logo, large clock, date, user + password
-  fields, `host · vitta <version>` line; shutdown/reboot on the login screen.
+- **Screen layout** (login & lock, everything horizontally centred): clock
+  `HH:mm` (bold, ~0.09 × height) and date `dddd d MMMM yyyy` (muted, ~0.03 ×
+  height) above the bands; user + password fields (lock: password only),
+  status line and `host · vitta <version>` line (muted) below. Nothing overlaps
+  the bands or the logo gap. Shutdown/reboot bottom-right on the login screen.
+  The lock screen's bands and positions are % of the monitor; its logo and
+  text sizes are px computed for 1080p (hyprlock has no % for those).
 
 ### 5.5 Day/night rule
 `vitta-theme mode` → `light` between local sunrise and sunset at coordinates in
@@ -170,7 +182,7 @@ derived from that single palette at build time.
 - `.chezmoi.toml.tmpl`: add `isVitta` (os-release `ID=vitta`); introduce a
   "my image" predicate (`isBluefin or isVitta`) and switch the existing 15
   `isBluefin` gates to it unless a gate is genuinely Bluefin-specific.
-- hyprlock: on Vitta, render the striped card from `/usr/share/vitta/theme/`
+- hyprlock: on Vitta, render the layout A lock screen from `/usr/share/vitta/theme/`
   in the mode returned by `vitta-theme mode` at lock time (lock script picks
   the config); keep the fingerprint block; non-Vitta machines keep today's
   config unchanged.
@@ -208,7 +220,7 @@ Switch: `sudo bootc switch ghcr.io/dpietersz/vitta:testing`, reboot,
 1. LUKS passphrase at boot still works (stock prompt).
 2. Greeter appears in the correct mode for the time of day; login works; keyring unlocked (no keyring prompt from Teams/Storage Explorer).
 3. niri + Noctalia session identical to `bluefin-udx`; `chezmoi apply` deploys hyprlock/idle stack (no `isBluefin` loss).
-4. Lock screen matches greeter look and mode; unlock by password.
+4. Lock screen matches the greeter's layout A look (full-width bands, logo in a round gap, clock/date above, password + host line below, no overlaps) and mode; unlock by password.
 5. Teams: screen share a window and a full screen.
 6. OBS virtual camera visible in Teams/Chromium.
 7. `docker run hello-world`; distrobox toolboxes start and exported apps launch.
@@ -227,9 +239,11 @@ Switch: `sudo bootc switch ghcr.io/dpietersz/vitta:testing`, reboot,
 - Logo generation prompts and post-processing (owner approves output).
   *[builder call]* Build the greeter/hyprlock plumbing against a
   placeholder logo; swap in the approved logo late.
-- Stripe geometry *[clarified]*: four concentric rounded-rectangle borders
-  around the card (like four nested outlines), not a background band. Visual
-  references are saved in `docs/superpowers/specs/assets/`.
+- Stripe geometry *[superseded by R20, layout A]*: originally four concentric
+  rounded-rectangle borders around a card; the owner replaced this with four
+  full-width background bands and no card (§5.4). References:
+  `assets/vitta-ref-bands-dark.png`, `assets/vitta-ref-bands-light.png`,
+  approved mockup `assets/vitta-login-layout-a.png`.
 
 ## 11. CI shape *[builder call]*
 
