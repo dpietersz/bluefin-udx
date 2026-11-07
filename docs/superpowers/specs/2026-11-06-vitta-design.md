@@ -88,7 +88,9 @@ evolving — not freezing in old patterns.
   (no strokes, shadows or gradients) horizontal bands span the whole screen
   edge to edge, top to bottom `stripe1`..`stripe4`, each round(0.022 × screen
   height) thick (16 px at 720p, 24 px at 1080p), the block centred at 40 % of
-  the height.
+  the height. The lock screen emits whole numbers only (R21: hyprlock parses
+  `%` with the locale-sensitive `std::stof`), so its bands are 2 % of the
+  height (21.6 px at 1080p) and every position is a whole percent.
   - dark: aqua `#689d6a` · blue `#458588` · yellow `#d79921` · red `#cc241d`
   - light: aqua `#8ec07c` · blue `#83a598` · yellow `#fabd2f` · red `#fb4934`
 - **Logo on the bands**: centred horizontally and on the band block, size
