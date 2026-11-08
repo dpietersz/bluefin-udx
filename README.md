@@ -10,10 +10,10 @@
 
 This repository builds [bootc](https://containers.github.io/bootc/) images for my Lenovo ThinkPads:
 
-- **T580** (Intel iGPU only) — `ghcr.io/dpietersz/bluefin-udx:stable` today; Vitta is the testing replacement.
+- **T580** (Intel iGPU only) — `ghcr.io/dpietersz/vitta:stable`; Bluefin UDX remains the rollback image.
 - **P14s Gen5 i7** (Intel + NVIDIA RTX) — `ghcr.io/dpietersz/bluefin-udx-nvidia:stable`.
 
-[Vitta](#vitta-testing--t580-first) is a personal, GNOME-free niri desktop on Universal Blue's desktop-less `base-main:44`. It reuses the shared UDX module set and adds the desktop plumbing Bluefin DX supplied; CI publishes it only as `ghcr.io/dpietersz/vitta:testing` until the T580 acceptance checklist is complete.
+[Vitta](#vitta-stable--t580-first) is a personal, GNOME-free niri desktop on Universal Blue's desktop-less `base-main:44`. It reuses the shared UDX module set and adds the desktop plumbing Bluefin DX supplied; CI publishes `:testing`, date, and commit-SHA tags, while `:stable` advances only through an owner-triggered promotion.
 
 It is **not** a community distro. It is **not** seeking users or contributors. It exists because:
 
@@ -86,25 +86,36 @@ On Bluefin with `bootc` CLI present:
 sudo bootc switch ghcr.io/<you>/<your-image>:stable
 ```
 
-## Vitta (testing — T580 first)
+## Vitta (stable — T580 first)
 
-Vitta is not yet the T580 daily driver. After its PR is merged and CI has published a testing image, switch the T580 with:
+Vitta is the T580 daily driver. Switch the T580 to the owner-promoted stable image with:
 
 ```bash
-sudo bootc switch --enforce-container-sigpolicy ghcr.io/dpietersz/vitta:testing
+sudo bootc switch --enforce-container-sigpolicy ghcr.io/dpietersz/vitta:stable
 sudo systemctl reboot
 ```
 
-The image carries the same trust policy as the UDX images, and a machine on `bluefin-udx` already trusts the `ghcr.io/dpietersz` signing key, so the signature is enforced from the first switch. The full checklist, including recovery if the greeter does not appear, is [`docs/how-to/vitta-t580-acceptance.md`](docs/how-to/vitta-t580-acceptance.md).
+The image carries the same trust policy as the UDX images, and a machine on `bluefin-udx` already trusts the `ghcr.io/dpietersz` signing key, so the signature is enforced from the first switch. If `bootc` is unavailable, use the signed rebase form instead:
 
-If acceptance fails, return to the previous deployment:
+```bash
+sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/dpietersz/vitta:stable
+sudo systemctl reboot
+```
+
+The full acceptance and recovery checklist is [`docs/how-to/vitta-t580-acceptance.md`](docs/how-to/vitta-t580-acceptance.md). To return to the previous deployment:
 
 ```bash
 sudo bootc rollback
 sudo systemctl reboot
 ```
 
-Vitta's T580-first acceptance remains pending. CI publishes `:testing`, date, and commit-SHA tags only; it never publishes `vitta:stable`. See the [design](docs/superpowers/specs/2026-11-06-vitta-design.md) and [implementation plan](docs/superpowers/plans/2026-11-06-vitta.md).
+CI publishes Vitta only as `:testing`, date, and commit-SHA tags. To deliberately promote a verified source to `:stable` after owner review, run:
+
+```bash
+gh workflow run promote-vitta.yml -f source=testing -f confirm=promote
+```
+
+The promotion workflow resolves the source to its registry digest, verifies its cosign signature, retags that exact digest as `:stable`, and verifies the stable reference. It is never run by `build.yml`. See the [design](docs/superpowers/specs/2026-11-06-vitta-design.md) and [implementation plan](docs/superpowers/plans/2026-11-06-vitta.md).
 
 ## Daily updates
 

@@ -8,9 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `bluefin-udx` — Intel/AMD (ThinkPad T580)
 - `bluefin-udx-nvidia` — NVIDIA open kernel (ThinkPad P14s Gen5)
-- `vitta` — T580-first replacement, published only as `ghcr.io/dpietersz/vitta:testing` until owner-approved acceptance and promotion
+- `vitta` — T580-first replacement, released as `ghcr.io/dpietersz/vitta:stable` only after owner-approved promotion
 
-Built nightly (04:20 UTC) and on push to `recipes/`, `scripts/`, `files/`, `cosign.pub`, or the workflow itself. The images are cosign-signed and use the baked trust policy; Vitta CI pushes only `:testing`, date, and SHA tags—never `:stable`. Its Vitta-only modules and overlay live in `recipes/vitta-modules.yml` and `files/vitta/`.
+Built nightly (04:20 UTC) and on push to `recipes/`, `scripts/`, `files/`, `cosign.pub`, or the workflow itself. The images are cosign-signed and use the baked trust policy; Vitta CI pushes only `:testing`, date, and SHA tags—never `:stable`. Vitta `:stable` is promoted manually through `promote-vitta.yml`, never by `build.yml`. Its Vitta-only modules and overlay live in `recipes/vitta-modules.yml` and `files/vitta/`.
 
 It is **NOT** a community distro. The package list is Dimitri's; forks are welcome but unsupported.
 
