@@ -671,6 +671,9 @@ jobs:
                 check_rpm plymouth-plugin-script
                 VITTA_PLY_PLUGINS=$(plymouth --get-splash-plugin-path 2>/dev/null || echo /usr/lib64/plymouth/)
                 check_file "${VITTA_PLY_PLUGINS}script.so"
+                # LUKS prompt (R25): Monaspace Neon reaches the initramfs through the vitta-plymouth-font dracut module.
+                check_file /usr/lib/dracut/modules.d/99vitta-plymouth-font/module-setup.sh
+                check_file /usr/lib/dracut/dracut.conf.d/90-vitta-plymouth-font.conf
                 VITTA_THEME_DIR=/usr/share/plymouth/themes/vitta
                 VITTA_PLY_FILES=$(find "$VITTA_THEME_DIR" -maxdepth 1 -type f -printf "%f\n" | sort)
                 if [ -n "$VITTA_PLY_FILES" ]; then
@@ -702,12 +705,16 @@ jobs:
                     VITTA_INITRD_FILE="usr/share/plymouth/themes/vitta/$VITTA_PLY_FILE"
                     if printf "%s\n" "$VITTA_LSINITRD" | grep -qF " $VITTA_INITRD_FILE"; then echo "  ok    initramfs has $VITTA_INITRD_FILE"; else echo "  FAIL  initramfs ${VITTA_INITRAMFS:-?} lacks $VITTA_INITRD_FILE"; FAIL=1; fi
                 done
-                for VITTA_INITRD_FILE in usr/lib64/plymouth/script.so usr/lib64/plymouth/label-freetype.so usr/share/fonts/Plymouth.ttf; do
+                for VITTA_INITRD_FILE in usr/lib64/plymouth/script.so usr/lib64/plymouth/label-freetype.so usr/share/fonts/Plymouth.ttf usr/share/fonts/monaspace-neon/MonaspaceNeon-Regular.otf usr/share/fonts/monaspace-neon/MonaspaceNeon-Bold.otf; do
                     if printf "%s\n" "$VITTA_LSINITRD" | grep -qF " $VITTA_INITRD_FILE"; then echo "  ok    initramfs has $VITTA_INITRD_FILE"; else echo "  FAIL  initramfs ${VITTA_INITRAMFS:-?} lacks $VITTA_INITRD_FILE"; FAIL=1; fi
                 done
                 if [ -n "$VITTA_LSINITRD" ] && lsinitrd -f usr/share/plymouth/plymouthd.defaults "$VITTA_INITRAMFS" 2>/dev/null | grep -qx "Theme=vitta"; then echo "  ok    initramfs plymouthd.defaults: Theme=vitta"; else echo "  FAIL  initramfs plymouthd.defaults does not select vitta"; FAIL=1; fi
+                # label-freetype loads only these two paths: Plymouth-monospace.ttf for the prompt text, Plymouth.ttf otherwise.
+                for VITTA_FONT_LINK in "Plymouth-monospace.ttf -> /usr/share/fonts/monaspace-neon/MonaspaceNeon-Regular.otf" "Plymouth.ttf -> /usr/share/fonts/monaspace-neon/MonaspaceNeon-Bold.otf"; do
+                    if printf "%s\n" "$VITTA_LSINITRD" | grep -qF " usr/share/fonts/$VITTA_FONT_LINK"; then echo "  ok    initramfs font link $VITTA_FONT_LINK"; else echo "  FAIL  initramfs ${VITTA_INITRAMFS:-?} lacks font link $VITTA_FONT_LINK"; FAIL=1; fi
+                done
                 # The rebuild must keep what makes the initramfs boot an ostree deployment at all.
-                for VITTA_DRACUT_MOD in ostree systemd plymouth; do
+                for VITTA_DRACUT_MOD in ostree systemd plymouth vitta-plymouth-font; do
                     if printf "%s\n" "$VITTA_LSINITRD" | sed -n "/^dracut modules:/,/^=====/p" | grep -qx "$VITTA_DRACUT_MOD"; then echo "  ok    initramfs dracut module $VITTA_DRACUT_MOD"; else echo "  FAIL  initramfs lacks dracut module $VITTA_DRACUT_MOD"; FAIL=1; fi
                 done
                 # The splash only shows with rhgb/splash on the command line; those come from the install

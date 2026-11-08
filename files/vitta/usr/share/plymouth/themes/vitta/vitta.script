@@ -10,19 +10,28 @@
 # the badge gap as boot progress reaches 1 (ease-out cubic). Every size follows
 # the screen height, so one script fits 1366x768 up to 3840x2160.
 #
-# Password and question prompts are deliberately plain (owner): prompt text, a
-# flat box, square bullets. Plymouth messages are plain text at the bottom.
+# Password and question prompts get their own screen (ruling R25,
+# docs/superpowers/specs/2026-11-08-vitta-luks-prompt-design.md): while
+# Plymouth asks, the splash sprites are hidden (their animation keeps running
+# underneath) and the prompt screen shows the Fedora logo top centre, the entry
+# field, the prompt text and four full-width bands flush with the bottom edge.
+# Back in normal mode the splash reappears where progress is. Plymouth messages
+# are plain text at the bottom of the splash.
 #
 # Images are pre-rendered per design height by
 # scripts/vitta-bootsplash-assets.py (badge-<H>.png = gap disc + logo,
-# wordmark-<H>.png). Plymouth scales with unfiltered bilinear sampling, which
-# aliases on large down-scales, so the script picks the smallest design height
-# >= the screen height and scales by at most ~1.2.
+# wordmark-<H>.png, logo-<H>.png for the prompt screen). Plymouth scales with
+# unfiltered bilinear sampling, which aliases on large down-scales, so the
+# script picks the design height nearest the screen height and scales by at
+# most ~1.2.
 #
 # Script-language notes: a bare assignment inside a function creates a local
 # unless a global of that name already exists, so shared state lives in the
 # global hashes below and function temporaries use `local.`. Anything that
-# fails here (missing image, bad value) only draws less; it cannot hang boot.
+# fails at run time (missing image, missing font, bad value) only draws less;
+# the passphrase stays enterable and plymouthd's Esc/details toggle is never
+# intercepted. A parse error would stop the whole script: the preview harness
+# (scripts/vitta-bootsplash-preview.sh) runs it with the real plugin.
 
 # ---- palette: files/vitta/usr/share/vitta/theme/palette.toml [dark] ---------
 # Plymouth truncates 255 * channel to an integer, so pass (v + 0.5) / 255: a
@@ -35,8 +44,12 @@ fun channel (v)
 palette.bg = [40, 40, 40];         # bg    #282828
 palette.fg = [235, 219, 178];      # fg    #ebdbb2
 palette.muted = [168, 153, 132];   # muted #a89984
+palette.fg2 = [213, 196, 161];     # #d5c4a1 prompt text (Gruvbox fg2, R25)
 # Band colours stripe1..4 (#689d6a #458588 #d79921 #cc241d) live in the 1x1
-# tiles band1.png .. band4.png; field.png (#3c3836) is the prompt box fill.
+# tiles band1.png .. band4.png. Prompt screen tiles: field.png (#32302f, Gruvbox
+# bg0_s, the entry fill), focus.png (#689d6a, palette focus, field border),
+# error.png (#fb4934, palette error, border after a wrong passphrase), fg.png
+# (bullets) and muted.png (lock glyph).
 
 Window.SetBackgroundTopColor (channel (palette.bg[0]), channel (palette.bg[1]), channel (palette.bg[2]));
 Window.SetBackgroundBottomColor (channel (palette.bg[0]), channel (palette.bg[1]), channel (palette.bg[2]));
@@ -46,10 +59,20 @@ fun round (v)
   return Math.Int (v + 0.5);
 }
 
-fun text_image (text, colour)
+# ---- font ------------------------------------------------------------------------
+# In the initramfs Plymouth draws text with label-freetype, which knows two
+# faces only: a family string containing "mono" gets
+# /usr/share/fonts/Plymouth-monospace.ttf, anything else Plymouth.ttf. The
+# vitta-plymouth-font dracut module points those at Monaspace Neon Regular and
+# Bold. On the real root (shutdown splash) label-pango resolves the same string
+# through fontconfig: Monaspace Neon first, any monospace font as fallback. A
+# missing font file only means no text; the field and bullets still work.
+fonts.regular = "Monaspace Neon,monospace";
+
+fun text_image (text, colour, px)
 {
   return Image.Text (text, channel (colour[0]), channel (colour[1]), channel (colour[2]), 1,
-                     "Sans " + geo.font_px + "px");
+                     fonts.regular + " " + px + "px");
 }
 
 # ---- shared state ----------------------------------------------------------------
@@ -57,16 +80,21 @@ fun text_image (text, colour)
 # functions reach these globals instead of making locals.
 screen.w = 0;
 geo.band = 0;
+pgeo.logo = 0;         # prompt-screen geometry (R25)
 badge.x = 0;
 word.x = 0;
 bands.length = 0;
+pr.line_count = 0;     # prompt-screen sprites and their derived state
 progress.target = 0;   # latest boot / offline-update progress, never decreasing
 progress.shown = 0;    # eases towards target each frame so status jumps glide
 message.text = "";
 prompt.active = 0;     # 1 while a password / question prompt is up
+prompt.kind = "";      # "password" or "question" while active
 prompt.text = "";
 prompt.entry_text = "";
 prompt.bullets_wanted = 0;
+prompt.error = 0;      # 1 while re-asking after a wrong passphrase
+prompt.answered = [];  # password prompt texts already answered once (key = text)
 
 # ---- pre-rendered design heights (scripts/vitta-bootsplash-assets.py) -------------
 ladder = [720, 768, 800, 900, 1080, 1200, 1440, 1600, 1800, 2160];
@@ -129,6 +157,7 @@ fun layout ()
   geo.badge_half = Math.Max (geo.gap, Math.Int (geo.word_w / 2) + 1);
   geo.badge_x = Math.Min (round (0.81 * screen.w), screen.w - geo.badge_half - round (0.02 * screen.h));
   # Badge: bg disc + Fedora logo in one image, the Lenovo wordmark under it.
+  badge.sprite = NULL;
   local.image = ladder_image ("badge", screen.h);
   if (local.image)
     {
@@ -138,6 +167,7 @@ fun layout ()
       badge.sprite.SetPosition (screen.x + geo.badge_x - geo.gap, screen.y + geo.centre - geo.gap, 10);
     }
 
+  word.sprite = NULL;
   local.image = ladder_image ("wordmark", screen.h);
   if (local.image)
     {
@@ -160,7 +190,6 @@ fun layout ()
       bands[local.i].sprite.SetPosition (screen.x - bands.length, screen.y + geo.top + local.i * geo.band, 1);
       bands[local.i].sprite.SetOpacity (0);
     }
-  place_bands (ease_out (progress.shown));
 
   # Message line, bottom centre.
   message.sprite = Sprite ();
@@ -168,38 +197,146 @@ fun layout ()
   if (message.text != "")
     display_message_callback (message.text);
 
-  # Prompt: plain and functional (not styled, owner). Prompt text, then a flat
-  # box (muted 1-2 px border, field fill), square fg bullets for a password or
-  # the typed text for a question, and a Caps Lock hint under the box.
-  prompt.box_w = Math.Min (round (0.4 * screen.h), screen.w - 2 * geo.margin);
-  prompt.box_h = round (0.045 * screen.h);
-  prompt.border = Math.Max (1, round (0.002 * screen.h));
-  prompt.bullet = Math.Max (3, round (0.009 * screen.h));
-  prompt.pad = Math.Int ((prompt.box_h - prompt.bullet) / 2);
-  prompt.cap = Math.Int ((prompt.box_w - 2 * prompt.pad + prompt.bullet) / (2 * prompt.bullet));
-  prompt.line_h = text_image ("Ag", palette.fg).GetHeight ();
-  prompt.box_x = screen.x + Math.Int ((screen.w - prompt.box_w) / 2);
-  prompt.text_y = screen.y + round (0.7 * screen.h);
-  prompt.box_y = prompt.text_y + prompt.line_h + round (0.012 * screen.h);
-
-  prompt.label = Sprite ();
-  prompt.frame = Sprite (Image ("muted.png").Tile (prompt.box_w, prompt.box_h));
-  prompt.frame.SetPosition (prompt.box_x, prompt.box_y, 30);
-  prompt.field = Sprite (Image ("field.png").Tile (prompt.box_w - 2 * prompt.border,
-                                                   prompt.box_h - 2 * prompt.border));
-  prompt.field.SetPosition (prompt.box_x + prompt.border, prompt.box_y + prompt.border, 31);
-  prompt.entry = Sprite ();
-  local.image = text_image ("Caps Lock is on", palette.muted);
-  prompt.caps = Sprite (local.image);
-  prompt.caps.SetPosition (screen.x + Math.Int ((screen.w - local.image.GetWidth ()) / 2),
-                           prompt.box_y + prompt.box_h + round (0.012 * screen.h), 30);
-  prompt.bullet_image = Image ("fg.png").Tile (prompt.bullet, prompt.bullet);
-  prompt.bullets = [];
-  prompt.bullet_count = 0;
+  layout_prompt ();
   if (prompt.active)
-    show_prompt (prompt.text, prompt.entry_text, prompt.bullets_wanted);
+    show_prompt (prompt.kind, prompt.text, prompt.entry_text, prompt.bullets_wanted);
   else
-    prompt_opacity (0);
+    apply_screen ();
+}
+
+# ---- prompt screen layout (R25) ------------------------------------------------------
+# Fedora logo 21 % of the height with its top at 16 %; entry field centred at
+# 52 % of the height, 31 % of the width, #32302f fill, a 3 px (at 1080p) focus
+# border, a lock glyph at the left and square fg bullets; the prompt text in
+# fg2 under the field; four full-width bands, each 2.2 % of the height, flush
+# with the bottom edge. No keyboard-layout line: the script API has no keymap
+# (script-lib-plymouth.c exposes only GetCapslockState and GetMode).
+fun layout_prompt ()
+{
+  pgeo.logo = round (0.21 * screen.h);                     # Fedora logo edge length
+  pgeo.logo_top = round (0.16 * screen.h);                 # top edge of the logo
+  pgeo.field_w = Math.Min (round (0.31 * screen.w), screen.w - 2 * geo.margin);
+  pgeo.field_h = round (0.054 * screen.h);
+  pgeo.field_x = Math.Int ((screen.w - pgeo.field_w) / 2);
+  pgeo.field_y = round (0.52 * screen.h) - Math.Int (pgeo.field_h / 2);
+  pgeo.border = Math.Max (2, round (0.0028 * screen.h));   # 3 px at 1080p
+  pgeo.pad = Math.Max (4, round (0.016 * screen.h));       # inner padding of the field
+  pgeo.bullet = Math.Max (4, round (0.009 * screen.h));    # square bullet edge
+  pgeo.font_px = Math.Max (12, round (0.022 * screen.h));
+  pgeo.text_gap = round (0.018 * screen.h);                # field bottom -> prompt text
+  pgeo.text_w = screen.w - 2 * geo.margin;                 # widest prompt text line
+  pgeo.max_lines = 3;                                      # longer prompts are elided
+
+  pr.logo = NULL;
+  local.image = ladder_image ("logo", screen.h);
+  if (local.image)
+    {
+      if (local.image.GetWidth () != pgeo.logo)
+        local.image = local.image.Scale (pgeo.logo, pgeo.logo);
+      pr.logo = Sprite (local.image);
+      pr.logo.SetPosition (screen.x + Math.Int ((screen.w - pgeo.logo) / 2), screen.y + pgeo.logo_top, 40);
+    }
+
+  # Field: border colour = a full-size tile under the fill tile, so switching
+  # focus <-> error is one SetImage.
+  pr.frame_focus = Image ("focus.png").Tile (pgeo.field_w, pgeo.field_h);
+  pr.frame_error = Image ("error.png").Tile (pgeo.field_w, pgeo.field_h);
+  pr.frame = Sprite (pr.frame_focus);
+  pr.frame.SetPosition (screen.x + pgeo.field_x, screen.y + pgeo.field_y, 40);
+  pr.field = Sprite (Image ("field.png").Tile (pgeo.field_w - 2 * pgeo.border, pgeo.field_h - 2 * pgeo.border));
+  pr.field.SetPosition (screen.x + pgeo.field_x + pgeo.border, screen.y + pgeo.field_y + pgeo.border, 41);
+
+  # Lock glyph from muted tiles (crisp at every size): body plus a squared
+  # shackle of three strokes, vertically centred in the field.
+  local.body_w = Math.Max (8, round (0.02 * screen.h));
+  local.body_h = Math.Max (6, round (0.016 * screen.h));
+  local.shackle_h = Math.Max (5, round (0.012 * screen.h));
+  local.inset = Math.Max (2, round (0.004 * screen.h));
+  local.stroke = pgeo.border;
+  local.x = screen.x + pgeo.field_x + pgeo.border + pgeo.pad;
+  local.y = screen.y + pgeo.field_y + Math.Int ((pgeo.field_h - local.shackle_h - local.body_h) / 2);
+  local.tile = Image ("muted.png");
+  pr.lock[0] = Sprite (local.tile.Tile (local.body_w, local.body_h));
+  pr.lock[0].SetPosition (local.x, local.y + local.shackle_h, 42);
+  pr.lock[1] = Sprite (local.tile.Tile (local.stroke, local.shackle_h));
+  pr.lock[1].SetPosition (local.x + local.inset, local.y, 42);
+  pr.lock[2] = Sprite (local.tile.Tile (local.stroke, local.shackle_h));
+  pr.lock[2].SetPosition (local.x + local.body_w - local.inset - local.stroke, local.y, 42);
+  pr.lock[3] = Sprite (local.tile.Tile (local.body_w - 2 * local.inset, local.stroke));
+  pr.lock[3].SetPosition (local.x + local.inset, local.y, 42);
+
+  # Bullets start after the lock; a question's typed text starts at the pad.
+  pr.bullets_x = local.x + local.body_w + pgeo.pad;
+  pr.entry_x = screen.x + pgeo.field_x + pgeo.border + pgeo.pad;
+  pr.right = screen.x + pgeo.field_x + pgeo.field_w - pgeo.border - pgeo.pad;
+  pr.bullet_y = screen.y + pgeo.field_y + Math.Int ((pgeo.field_h - pgeo.bullet) / 2);
+  pr.cap = Math.Max (1, Math.Int ((pr.right - pr.bullets_x - pgeo.bullet) / (2 * pgeo.bullet)) + 1);
+  pr.bullet_image = Image ("fg.png").Tile (pgeo.bullet, pgeo.bullet);
+  pr.bullets = [];
+  pr.bullet_count = 0;
+  pr.entry = Sprite ();
+
+  # Prompt text (up to max_lines centred lines) and the Caps Lock hint under it.
+  pr.text_y = screen.y + pgeo.field_y + pgeo.field_h + pgeo.text_gap;
+  pr.line_h = 0;
+  local.image = text_image ("Ag", palette.fg2, pgeo.font_px);
+  if (local.image)
+    pr.line_h = local.image.GetHeight ();
+  for (local.i = 0; local.i < pgeo.max_lines; local.i++)
+    pr.lines[local.i] = Sprite ();
+  pr.line_count = 0;
+  pr.shown_text = "";
+  pr.text_ready = 0;
+  pr.caps = Sprite (text_image ("Caps Lock is on", palette.muted, pgeo.font_px));
+  pr.caps_on = 0;
+
+  # Bottom bands, full width, flush with the bottom edge (stripe order top-down).
+  for (local.i = 0; local.i < 4; local.i++)
+    {
+      pr.bands[local.i] = Sprite (Image ("band" + (local.i + 1) + ".png").Tile (screen.w, geo.band));
+      pr.bands[local.i].SetPosition (screen.x, screen.y + screen.h - (4 - local.i) * geo.band, 40);
+    }
+}
+
+# ---- splash <-> prompt screen ---------------------------------------------------------
+# One switch for every sprite's visibility. Prompt up: splash badge, wordmark,
+# progress bands and message hidden (opacity 0; place_bands keeps moving the
+# bands so progress continues). Normal mode: the reverse.
+fun apply_screen ()
+{
+  local.on = prompt.active;
+  local.splash = !local.on;
+  if (badge.sprite)
+    badge.sprite.SetOpacity (local.splash);
+  if (word.sprite)
+    word.sprite.SetOpacity (local.splash);
+  bands.visible = -1;
+  place_bands (ease_out (progress.shown));
+  message.sprite.SetOpacity (local.splash && message.text != "");
+
+  if (pr.logo)
+    pr.logo.SetOpacity (local.on);
+  pr.frame.SetOpacity (local.on);
+  pr.field.SetOpacity (local.on);
+  for (local.i = 0; local.i < 4; local.i++)
+    {
+      pr.lock[local.i].SetOpacity (local.on && prompt.kind == "password");
+      pr.bands[local.i].SetOpacity (local.on);
+    }
+  for (local.i = 0; local.i < pgeo.max_lines; local.i++)
+    pr.lines[local.i].SetOpacity (local.on && local.i < pr.line_count);
+  pr.entry.SetOpacity (local.on && prompt.kind == "question" && prompt.entry_text != "");
+  pr.caps_on = 0;
+  if (local.on)
+    pr.caps_on = capslock ();
+  pr.caps.SetOpacity (pr.caps_on);
+}
+
+fun capslock ()
+{
+  if (Plymouth.GetCapslockState ())
+    return 1;
+  return 0;
 }
 
 # ---- bands and progress -------------------------------------------------------------
@@ -212,7 +349,7 @@ fun place_bands (fraction)
   for (local.i = 0; local.i < 4; local.i++)
     {
       bands[local.i].sprite.SetX (screen.x + local.visible - bands.length);
-      bands[local.i].sprite.SetOpacity (local.visible > 0);
+      bands[local.i].sprite.SetOpacity (local.visible > 0 && !prompt.active);
     }
 }
 
@@ -246,6 +383,16 @@ fun refresh_callback ()
       progress.shown = progress.shown + local.step;
     }
   place_bands (ease_out (progress.shown));
+  # Caps Lock has no callback of its own; follow it while a prompt is up.
+  if (prompt.active)
+    {
+      local.caps = capslock ();
+      if (local.caps != pr.caps_on)
+        {
+          pr.caps_on = local.caps;
+          pr.caps.SetOpacity (local.caps);
+        }
+    }
 }
 
 # Plymouth sends time-based boot progress in every mode; only a boot follows
@@ -262,15 +409,15 @@ fun system_update_callback (percent)
     set_target (percent / 100);
 }
 
-# ---- messages: plain text, centred at the bottom -------------------------------------
+# ---- messages: plain text, centred at the bottom of the splash -----------------------
 fun display_message_callback (text)
 {
   message.text = text;
-  local.image = text_image (text, palette.fg);
+  local.image = text_image (text, palette.fg, geo.font_px);
   message.sprite.SetImage (local.image);
   message.sprite.SetPosition (screen.x + Math.Int ((screen.w - local.image.GetWidth ()) / 2),
                               screen.y + screen.h - geo.margin - local.image.GetHeight (), 20);
-  message.sprite.SetOpacity (1);
+  message.sprite.SetOpacity (!prompt.active);
 }
 
 fun hide_message_callback (text)
@@ -285,73 +432,185 @@ fun hide_message_callback (text)
 # ---- password / question prompt ----------------------------------------------------
 # Only the password and question callbacks are set: the generic display-prompt
 # callback would receive the typed passphrase as text.
-fun prompt_opacity (opacity)
+
+# Crop an image wider than `width` to its centre `width` pixels (pixel crop,
+# so a multi-byte UTF-8 character can never be cut in half).
+fun fit_width (image, width)
 {
-  prompt.label.SetOpacity (opacity);
-  prompt.frame.SetOpacity (opacity);
-  prompt.field.SetOpacity (opacity);
-  prompt.entry.SetOpacity (opacity && prompt.entry_text != "");
-  prompt.caps.SetOpacity (opacity && Plymouth.GetCapslockState ());
+  if (image && image.GetWidth () > width)
+    return image.Crop (Math.Int ((image.GetWidth () - width) / 2), 0, width, image.GetHeight ());
+  return image;
+}
+
+fun text_width (text)
+{
+  local.image = text_image (text, palette.fg2, pgeo.font_px);
+  if (local.image)
+    return local.image.GetWidth ();
+  return 0;
+}
+
+# Greedy word wrap at spaces into at most pgeo.max_lines lines no wider than
+# pgeo.text_w; what does not fit ends the last line with "...". A single word
+# wider than a line is cropped by fit_width when drawn.
+fun wrap_text (text)
+{
+  local.out = [];
+  local.out.count = 0;
+  local.line = "";
+  local.start = 0;
+  local.n = text.Length ();
+  local.full = 0;
+  for (local.i = 0; local.i <= local.n && !local.full; local.i++)
+    {
+      if (local.i == local.n || text.CharAt (local.i) == " ")
+        {
+          if (local.i > local.start)
+            {
+              local.word = text.SubString (local.start, local.i);
+              if (local.line == "")
+                local.candidate = local.word;
+              else
+                local.candidate = local.line + " " + local.word;
+              if (local.line == "" || text_width (local.candidate) <= pgeo.text_w)
+                local.line = local.candidate;
+              else if (local.out.count < pgeo.max_lines - 1)
+                {
+                  local.out[local.out.count] = local.line;
+                  local.out.count++;
+                  local.line = local.word;
+                }
+              else
+                {
+                  if (text_width (local.line + " ...") <= pgeo.text_w)
+                    local.line = local.line + " ...";
+                  local.full = 1;
+                }
+            }
+          local.start = local.i + 1;
+        }
+    }
+  if (local.line != "")
+    {
+      local.out[local.out.count] = local.line;
+      local.out.count++;
+    }
+  return local.out;
+}
+
+fun set_prompt_text (text)
+{
+  pr.shown_text = text;
+  pr.text_ready = 1;
+  local.lines = wrap_text (text);
+  pr.line_count = Math.Min (local.lines.count, pgeo.max_lines);
+  for (local.i = 0; local.i < pr.line_count; local.i++)
+    {
+      local.image = fit_width (text_image (local.lines[local.i], palette.fg2, pgeo.font_px), pgeo.text_w);
+      if (local.image)
+        {
+          pr.lines[local.i].SetImage (local.image);
+          pr.lines[local.i].SetPosition (screen.x + Math.Int ((screen.w - local.image.GetWidth ()) / 2),
+                                         pr.text_y + local.i * pr.line_h, 42);
+        }
+    }
+  local.image = pr.caps.GetImage ();
+  if (local.image)
+    pr.caps.SetPosition (screen.x + Math.Int ((screen.w - local.image.GetWidth ()) / 2),
+                         pr.text_y + Math.Max (1, pr.line_count) * pr.line_h + round (0.012 * screen.h), 42);
+}
+
+fun set_frame (error)
+{
+  if (error && pr.frame_error)
+    pr.frame.SetImage (pr.frame_error);
+  else
+    pr.frame.SetImage (pr.frame_focus);
 }
 
 fun set_bullets (count)
 {
-  count = Math.Min (count, prompt.cap);
-  for (local.i = 0; local.i < count || local.i < prompt.bullet_count; local.i++)
+  count = Math.Min (count, pr.cap);
+  for (local.i = 0; local.i < count || local.i < pr.bullet_count; local.i++)
     {
-      if (!prompt.bullets[local.i])
+      if (!pr.bullets[local.i])
         {
-          prompt.bullets[local.i] = Sprite (prompt.bullet_image);
-          prompt.bullets[local.i].SetPosition (prompt.box_x + prompt.pad + 2 * local.i * prompt.bullet,
-                                               prompt.box_y + Math.Int ((prompt.box_h - prompt.bullet) / 2), 32);
+          pr.bullets[local.i] = Sprite (pr.bullet_image);
+          pr.bullets[local.i].SetPosition (pr.bullets_x + 2 * local.i * pgeo.bullet, pr.bullet_y, 42);
         }
-      prompt.bullets[local.i].SetOpacity (local.i < count);
+      pr.bullets[local.i].SetOpacity (local.i < count);
     }
-  prompt.bullet_count = Math.Max (count, prompt.bullet_count);
+  pr.bullet_count = Math.Max (count, pr.bullet_count);
 }
 
-fun show_prompt (text, entry_text, bullets)
+fun show_prompt (kind, text, entry_text, bullets)
 {
   prompt.active = 1;
+  prompt.kind = kind;
   prompt.text = text;
   prompt.entry_text = entry_text;
   prompt.bullets_wanted = bullets;
 
-  local.image = text_image (text, palette.fg);
-  prompt.label.SetImage (local.image);
-  prompt.label.SetPosition (screen.x + Math.Int ((screen.w - local.image.GetWidth ()) / 2), prompt.text_y, 30);
+  # The callbacks fire on every keystroke; render the wrapped text only when
+  # it changes.
+  if (!pr.text_ready || text != pr.shown_text)
+    set_prompt_text (text);
 
   if (entry_text != "")
     {
-      local.image = text_image (entry_text, palette.fg);
-      local.room = prompt.box_w - 2 * prompt.pad;
-      if (local.image.GetWidth () > local.room)
+      local.image = text_image (entry_text, palette.fg, pgeo.font_px);
+      local.room = pr.right - pr.entry_x;
+      if (local.image && local.image.GetWidth () > local.room)
         local.image = local.image.Crop (local.image.GetWidth () - local.room, 0, local.room, local.image.GetHeight ());
-      prompt.entry.SetImage (local.image);
-      prompt.entry.SetPosition (prompt.box_x + prompt.pad,
-                                prompt.box_y + Math.Int ((prompt.box_h - local.image.GetHeight ()) / 2), 32);
+      if (local.image)
+        {
+          pr.entry.SetImage (local.image);
+          pr.entry.SetPosition (pr.entry_x, screen.y + pgeo.field_y + Math.Int ((pgeo.field_h - local.image.GetHeight ()) / 2), 42);
+        }
     }
 
-  prompt_opacity (1);
+  set_frame (prompt.error);
+  apply_screen ();
   set_bullets (bullets);
+}
+
+# Leaving a password prompt (answered, or replaced by the next queued one)
+# marks its text answered: if cryptsetup asks with the same text again, the
+# passphrase was wrong.
+fun leave_password_prompt ()
+{
+  if (prompt.active && prompt.kind == "password")
+    prompt.answered[prompt.text] = 1;
 }
 
 fun display_password_callback (text, bullets)
 {
-  show_prompt (text, "", bullets);
+  if (!prompt.active || prompt.kind != "password" || text != prompt.text)
+    {
+      leave_password_prompt ();
+      prompt.error = 0;
+      if (prompt.answered[text] == 1)
+        prompt.error = 1;
+    }
+  show_prompt ("password", text, "", bullets);
 }
 
 fun display_question_callback (text, entry_text)
 {
-  show_prompt (text, entry_text, 0);
+  leave_password_prompt ();
+  prompt.error = 0;
+  show_prompt ("question", text, entry_text, 0);
 }
 
 fun display_normal_callback ()
 {
+  leave_password_prompt ();
   prompt.active = 0;
+  prompt.kind = "";
   prompt.entry_text = "";
-  prompt_opacity (0);
+  prompt.error = 0;
   set_bullets (0);
+  apply_screen ();
 }
 
 # ---- start --------------------------------------------------------------------------

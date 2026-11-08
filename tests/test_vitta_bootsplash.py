@@ -91,7 +91,7 @@ class BootsplashTests(unittest.TestCase):
         names = set(re.findall(r'Image \("([a-z0-9.-]+\.png)"\)', self.code))
         names |= {f"band{i}.png" for i in range(1, 5)}
         ladder = assets_constant("LADDER")
-        names |= {f"{kind}-{h}.png" for kind in ("badge", "wordmark") for h in ladder}
+        names |= {f"{kind}-{h}.png" for kind in ("badge", "wordmark", "logo") for h in ladder}
         for name in sorted(names):
             self.assertTrue((THEME_DIR / name).is_file(), name)
 
@@ -131,7 +131,9 @@ class BootsplashTests(unittest.TestCase):
         expected = {
             "band1": self.dark["stripe1"], "band2": self.dark["stripe2"],
             "band3": self.dark["stripe3"], "band4": self.dark["stripe4"],
-            "fg": self.dark["fg"], "muted": self.dark["muted"], "field": "#3c3836",
+            "fg": self.dark["fg"], "muted": self.dark["muted"],
+            # LUKS prompt screen (R25): field fill bg0_s, border focus / error.
+            "field": "#32302f", "focus": self.dark["focus"], "error": self.dark["error"],
         }
         for name, colour in expected.items():
             self.assertEqual(png_pixel(THEME_DIR / f"{name}.png"), colour, name)
@@ -226,11 +228,11 @@ class BootsplashTests(unittest.TestCase):
 
     def test_messages_plain_text_at_the_bottom(self):
         self.assertIn("screen.y + screen.h - geo.margin - local.image.GetHeight (), 20);", self.code)
-        self.assertIn("local.image = text_image (text, palette.fg);", self.code)
+        self.assertIn("local.image = text_image (text, palette.fg, geo.font_px);", self.code)
 
     def test_password_box_shows_capped_bullets_not_text(self):
-        self.assertIn('show_prompt (text, "", bullets);', self.code)
-        self.assertIn("count = Math.Min (count, prompt.cap);", self.code)
+        self.assertIn('show_prompt ("password", text, "", bullets);', self.code)
+        self.assertIn("count = Math.Min (count, pr.cap);", self.code)
 
     # ---- wiring --------------------------------------------------------------------
     def test_recipe_installs_plugin_sets_default_and_rebuilds_initramfs_last(self):
@@ -267,7 +269,16 @@ class BootsplashTests(unittest.TestCase):
             'VITTA_LSINITRD=$(lsinitrd "$VITTA_INITRAMFS" 2>/dev/null || true)',
             "usr/lib64/plymouth/script.so",
             'lsinitrd -f usr/share/plymouth/plymouthd.defaults "$VITTA_INITRAMFS"',
-            "for VITTA_DRACUT_MOD in ostree systemd plymouth; do",
+            "for VITTA_DRACUT_MOD in ostree systemd plymouth vitta-plymouth-font; do",
+            # LUKS prompt font (R25) inside the exact kernel initramfs.
+            "usr/lib64/plymouth/label-freetype.so",
+            "usr/share/fonts/monaspace-neon/MonaspaceNeon-Regular.otf",
+            "usr/share/fonts/monaspace-neon/MonaspaceNeon-Bold.otf",
+            '"Plymouth-monospace.ttf -> /usr/share/fonts/monaspace-neon/MonaspaceNeon-Regular.otf"',
+            '"Plymouth.ttf -> /usr/share/fonts/monaspace-neon/MonaspaceNeon-Bold.otf"',
+            'grep -qF " usr/share/fonts/$VITTA_FONT_LINK"',
+            "check_file /usr/lib/dracut/modules.d/99vitta-plymouth-font/module-setup.sh",
+            "check_file /usr/lib/dracut/dracut.conf.d/90-vitta-plymouth-font.conf",
         )
         blocks = []
         for gate in SMOKE_GATES:
@@ -282,6 +293,210 @@ class BootsplashTests(unittest.TestCase):
             blocks.append([line.strip() for line in block.splitlines()])
         self.assertEqual(blocks[0], blocks[1], "CI and local smoke gates drifted")
 
+
+
+def script_geometry(code, width, height):
+    """Evaluate vitta.script's geo.* / pgeo.* assignments for one screen size.
+
+    The script's arithmetic is a tiny subset (round, Math.Max/Min/Int, + - * /),
+    so translating it to Python keeps the test tied to the real expressions.
+    """
+    env = {"rnd": rnd, "max": max, "min": min, "int": int, "w": width, "h": height, "G": {}, "P": {}}
+    for target, name, expr in re.findall(r"(?m)^\s*(geo|pgeo)\.(\w+) = (.+);", code):
+        expr = re.sub(r"\bpgeo\.(\w+)", r'P["\1"]', expr)
+        expr = re.sub(r"\bgeo\.(\w+)", r'G["\1"]', expr)
+        expr = (expr.replace("Math.Max (", "max(").replace("Math.Min (", "min(")
+                .replace("Math.Int (", "int(").replace("round (", "rnd(")
+                .replace("screen.w", "w").replace("screen.h", "h"))
+        env["G" if target == "geo" else "P"][name] = eval(expr, env)  # noqa: S307 (test-only, repo source)
+    return env["G"], env["P"]
+
+
+class LuksPromptTests(unittest.TestCase):
+    """LUKS prompt screen, ruling R25 (docs/superpowers/specs/2026-11-08-vitta-luks-prompt-design.md)."""
+
+    SIZES = ((1920, 1080), (1366, 768), (2560, 1440), (1280, 800), (3840, 2160), (1024, 768))
+
+    @classmethod
+    def setUpClass(cls):
+        cls.script = SCRIPT.read_text()
+        cls.code = "\n".join(line.split("#", 1)[0] for line in cls.script.splitlines())
+        cls.dark = tomllib.loads(PALETTE.read_text())["dark"]
+
+    def function(self, name):
+        m = re.search(rf"(?ms)^fun {name} \([^)]*\)\n\{{\n(.*?)^\}}", self.code)
+        self.assertIsNotNone(m, name)
+        return m.group(1)
+
+    # ---- layout constants vs R25 ----------------------------------------------------
+    def test_t580_prompt_geometry(self):
+        geo, pgeo = script_geometry(self.code, 1920, 1080)
+        self.assertEqual((pgeo["logo"], pgeo["logo_top"]), (227, 173))          # 21 % h, top at 16 % h
+        self.assertEqual((pgeo["field_w"], pgeo["field_h"]), (595, 58))         # 31 % w
+        self.assertEqual((pgeo["field_x"], pgeo["field_y"]), (662, 533))
+        self.assertEqual(pgeo["field_y"] + pgeo["field_h"] // 2, 562)            # centre at 52 % h
+        self.assertEqual(pgeo["border"], 3)                                     # 3 px border at 1080p
+        self.assertEqual(geo["band"], 24)                                       # 2.2 % h per band
+        self.assertEqual(pgeo["max_lines"], 3)
+
+    def test_prompt_geometry_follows_r25_at_every_size(self):
+        for w, h in self.SIZES:
+            geo, pgeo = script_geometry(self.code, w, h)
+            with self.subTest(size=f"{w}x{h}"):
+                self.assertLessEqual(abs(pgeo["logo"] - 0.21 * h), 1)
+                self.assertLessEqual(abs(pgeo["logo_top"] - 0.16 * h), 1)
+                self.assertLessEqual(abs(pgeo["field_y"] + pgeo["field_h"] / 2 - 0.52 * h), 1)
+                self.assertLessEqual(abs(pgeo["field_w"] - 0.31 * w), 1)
+                self.assertLessEqual(abs(pgeo["field_x"] * 2 + pgeo["field_w"] - w), 1)  # centred
+                self.assertEqual(geo["band"], max(1, rnd(0.022 * h)))
+                self.assertGreaterEqual(pgeo["border"], 2)
+                # The logo ends above the field; the field above the prompt bands.
+                self.assertLess(pgeo["logo_top"] + pgeo["logo"], pgeo["field_y"])
+                self.assertLess(pgeo["field_y"] + pgeo["field_h"] + pgeo["text_gap"], h - 4 * geo["band"])
+
+    def test_prompt_r25_expressions(self):
+        for line in (
+            "pgeo.logo = round (0.21 * screen.h);",
+            "pgeo.logo_top = round (0.16 * screen.h);",
+            "pgeo.field_w = Math.Min (round (0.31 * screen.w), screen.w - 2 * geo.margin);",
+            "pgeo.field_y = round (0.52 * screen.h) - Math.Int (pgeo.field_h / 2);",
+            "pgeo.field_x = Math.Int ((screen.w - pgeo.field_w) / 2);",
+        ):
+            self.assertIn(line, self.code)
+        self.assertIn("pr.logo.SetPosition (screen.x + Math.Int ((screen.w - pgeo.logo) / 2), screen.y + pgeo.logo_top, 40);",
+                      self.code)
+
+    def test_prompt_bands_full_width_flush_with_the_bottom(self):
+        self.assertIn('pr.bands[local.i] = Sprite (Image ("band" + (local.i + 1) + ".png").Tile (screen.w, geo.band));',
+                      self.code)
+        self.assertIn("pr.bands[local.i].SetPosition (screen.x, screen.y + screen.h - (4 - local.i) * geo.band, 40);",
+                      self.code)
+        h = 1080
+        band = rnd(0.022 * h)
+        self.assertEqual([h - (4 - i) * band for i in range(4)], [984, 1008, 1032, 1056])
+        self.assertEqual(h - (4 - 3) * band + band, h)  # last band ends on the bottom edge
+
+    def test_prompt_colours(self):
+        m = re.search(r"palette\.fg2 = \[(\d+), (\d+), (\d+)\];", self.code)
+        self.assertEqual("#%02x%02x%02x" % tuple(int(v) for v in m.groups()), "#d5c4a1")
+        self.assertIn("text_image (local.lines[local.i], palette.fg2, pgeo.font_px)", self.code)
+        self.assertIn('pr.frame_focus = Image ("focus.png").Tile (pgeo.field_w, pgeo.field_h);', self.code)
+        self.assertIn('pr.frame_error = Image ("error.png").Tile (pgeo.field_w, pgeo.field_h);', self.code)
+        self.assertIn('Image ("field.png").Tile (pgeo.field_w - 2 * pgeo.border, pgeo.field_h - 2 * pgeo.border)',
+                      self.code)
+        self.assertEqual(png_pixel(THEME_DIR / "field.png"), "#32302f")
+        self.assertEqual(png_pixel(THEME_DIR / "focus.png"), "#689d6a")
+        self.assertEqual(png_pixel(THEME_DIR / "error.png"), "#fb4934")
+        self.assertEqual(png_pixel(THEME_DIR / "fg.png"), "#ebdbb2")  # square bullets
+        self.assertIn('pr.bullet_image = Image ("fg.png").Tile (pgeo.bullet, pgeo.bullet);', self.code)
+
+    def test_logo_ladder_images_match_r25(self):
+        for h in assets_constant("LADDER"):
+            side = rnd(0.21 * h)
+            self.assertEqual(png_header(THEME_DIR / f"logo-{h}.png")[:2], (side, side), h)
+        self.assertIn('ladder_image ("logo", screen.h)', self.code)
+
+    # ---- splash hidden while prompting, restored after ----------------------------------
+    def test_splash_sprites_hidden_while_prompting_and_restored(self):
+        body = self.function("apply_screen")
+        self.assertIn("local.on = prompt.active;", body)
+        self.assertIn("local.splash = !local.on;", body)
+        self.assertIn("badge.sprite.SetOpacity (local.splash);", body)
+        self.assertIn("word.sprite.SetOpacity (local.splash);", body)
+        self.assertIn('message.sprite.SetOpacity (local.splash && message.text != "");', body)
+        self.assertIn("bands.visible = -1;\n  place_bands (ease_out (progress.shown));", body)
+        for sprite in ("pr.frame", "pr.field", "pr.bands[local.i]", "pr.logo"):
+            self.assertIn(f"{sprite}.SetOpacity (local.on", body)
+        # Progress bands keep moving underneath; they only show outside a prompt.
+        self.assertIn("SetOpacity (local.visible > 0 && !prompt.active);", self.function("place_bands"))
+        self.assertIn("place_bands (ease_out (progress.shown));", self.function("refresh_callback"))
+        self.assertIn("message.sprite.SetOpacity (!prompt.active);", self.function("display_message_callback"))
+
+    def test_prompt_and_normal_mode_switch_screens(self):
+        show = self.function("show_prompt")
+        self.assertLess(show.index("prompt.active = 1;"), show.index("apply_screen ();"))
+        normal = self.function("display_normal_callback")
+        self.assertLess(normal.index("prompt.active = 0;"), normal.index("apply_screen ();"))
+        self.assertIn("set_bullets (0);", normal)
+        # Hotplug re-layout restores whichever screen is current.
+        layout = self.function("layout")
+        self.assertIn("layout_prompt ();", layout)
+        self.assertIn("show_prompt (prompt.kind, prompt.text, prompt.entry_text, prompt.bullets_wanted);", layout)
+        self.assertIn("apply_screen ();", layout)
+
+    # ---- wrong passphrase ------------------------------------------------------------
+    def test_wrong_passphrase_turns_the_border_error_red(self):
+        frame = self.function("set_frame")
+        self.assertIn("if (error && pr.frame_error)\n    pr.frame.SetImage (pr.frame_error);", frame)
+        self.assertIn("pr.frame.SetImage (pr.frame_focus);", frame)
+        self.assertIn("set_frame (prompt.error);", self.function("show_prompt"))
+        # Retry = cryptsetup asks again with the text of an answered prompt.
+        self.assertIn("prompt.answered[prompt.text] = 1;", self.function("leave_password_prompt"))
+        password = self.function("display_password_callback")
+        self.assertIn("if (prompt.answered[text] == 1)\n        prompt.error = 1;", password)
+        self.assertIn("leave_password_prompt ();", self.function("display_normal_callback"))
+        self.assertIn("prompt.error = 0;", self.function("display_normal_callback"))
+
+    def test_password_shows_bullets_never_text(self):
+        self.assertIn('show_prompt ("password", text, "", bullets);', self.function("display_password_callback"))
+        self.assertNotIn("SetDisplayPromptFunction", self.code)
+        self.assertIn("pr.lock[local.i].SetOpacity (local.on && prompt.kind == \"password\");", self.code)
+        self.assertIn("pr.cap = Math.Max (1, ", self.code)
+
+    def test_long_prompts_wrap_and_never_overflow(self):
+        wrap = self.function("wrap_text")
+        self.assertIn('text.CharAt (local.i) == " "', wrap)
+        self.assertIn("text_width (local.candidate) <= pgeo.text_w", wrap)
+        self.assertIn('local.line = local.line + " ...";', wrap)
+        self.assertIn("pgeo.text_w = screen.w - 2 * geo.margin;", self.code)
+        self.assertIn("fit_width (text_image (local.lines[local.i], palette.fg2, pgeo.font_px), pgeo.text_w)",
+                      self.code)
+        self.assertIn("image.Crop (", self.function("fit_width"))
+
+    def test_no_keyboard_layout_line(self):
+        # Plymouth 24's script API has no keymap accessor (script-lib-plymouth.c:
+        # GetCapslockState and GetMode only), so R25's layout line is omitted.
+        for word in ("Keymap", "keymap", "Layout (", "GetKeyboard"):
+            self.assertNotIn(word, self.code)
+        self.assertIn("Plymouth.GetCapslockState ()", self.code)
+
+    # ---- font in the initramfs ------------------------------------------------------
+    def test_prompt_font_selects_label_freetypes_monospace_face(self):
+        m = re.search(r'fonts\.regular = "([^"]+)";', self.code)
+        self.assertIsNotNone(m)
+        self.assertTrue(m.group(1).startswith("Monaspace Neon"))
+        self.assertIn("mono", m.group(1))  # label-freetype: strstr(font, "mono") -> Plymouth-monospace.ttf
+        self.assertNotRegex(self.code, r'Image\.Text \([^)]*"Sans')
+
+    def test_dracut_module_links_monaspace_after_plymouth(self):
+        module = ROOT / "files/vitta/usr/lib/dracut/modules.d/99vitta-plymouth-font/module-setup.sh"
+        text = module.read_text()
+        self.assertEqual(text.splitlines()[0], "#!/bin/bash")
+        self.assertIn("echo plymouth", text)
+        self.assertIn('ln -sfn "$VITTA_FONT_DIR/MonaspaceNeon-Regular.otf" "${initdir}/usr/share/fonts/Plymouth-monospace.ttf"', text)
+        self.assertIn('ln -sfn "$VITTA_FONT_DIR/MonaspaceNeon-Bold.otf" "${initdir}/usr/share/fonts/Plymouth.ttf"', text)
+        self.assertIn("VITTA_FONT_DIR=/usr/share/fonts/monaspace-neon", text)
+        self.assertIn("return 255", text)
+        # Installed after 45plymouth's populate-initrd (dracut installs in directory order).
+        self.assertGreater(int(module.parent.name[:2]), 45)
+        conf = (ROOT / "files/vitta/usr/lib/dracut/dracut.conf.d/90-vitta-plymouth-font.conf").read_text()
+        self.assertIn('add_dracutmodules+=" vitta-plymouth-font "', conf)
+        # Fonts are baked before the initramfs module runs.
+        modules = (ROOT / "recipes/vitta-modules.yml").read_text()
+        self.assertIn("      - install-monaspace-neon.sh", modules)
+
+    def test_preview_harness_renders_text_like_the_initramfs(self):
+        render = (ROOT / "scripts/bootsplash-preview/render.sh").read_text()
+        self.assertIn('rm -f "${PLUGIN_DIR}label-pango.so"', render)
+        self.assertIn("mv /usr/bin/fc-match /usr/bin/fc-match.off", render)
+        self.assertIn('ln -sfn "$FONT_DIR/MonaspaceNeon-Regular.otf" /usr/share/fonts/Plymouth-monospace.ttf', render)
+        self.assertIn('ln -sfn "$FONT_DIR/MonaspaceNeon-Bold.otf" /usr/share/fonts/Plymouth.ttf', render)
+        containerfile = (ROOT / "scripts/bootsplash-preview/Containerfile").read_text()
+        install = (ROOT / "files/scripts/install-monaspace-neon.sh").read_text()
+        url = re.search(r'URL="([^"]+)"', install).group(1)
+        sha = re.search(r'SHA256="([0-9a-f]+)"', install).group(1)
+        self.assertIn(f"ARG MONASPACE_URL={url}", containerfile)
+        self.assertIn(f"ARG MONASPACE_SHA256={sha}", containerfile)
 
 if __name__ == "__main__":
     unittest.main()

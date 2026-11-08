@@ -5,12 +5,14 @@ Plymouth's script plugin scales images with unfiltered bilinear sampling,
 which aliases badly on large down-scales (a 512 px logo drawn at 259 px looks
 grainy). So the badge (bg gap disc + Fedora logo) and the Lenovo wordmark are
 pre-rendered with Lanczos for a ladder of design heights; vitta.script picks the
-smallest design height >= the screen height and scales by at most ~1.2.
+design height nearest the screen height and scales by at most ~1.2. The same
+goes for the plain Fedora logo of the LUKS prompt screen (R25).
 
 Geometry must match vitta.script and R23 (tests/test_vitta_bootsplash.py checks
 both):
   logo  = round(0.24 * H)          gap radius = round(0.54 * logo)
   badge = 2 * gap square           wordmark width = round(0.26 * H)
+  prompt logo = round(0.21 * H) square (R25)
 
 Needs Pillow. Run it in the preview container, which has it:
   podman run --rm -v "$PWD:/repo:z" -w /repo localhost/vitta-bootsplash-preview \
@@ -37,8 +39,10 @@ TILES = {
     "band3": (0xD7, 0x99, 0x21),  # stripe3
     "band4": (0xCC, 0x24, 0x1D),  # stripe4
     "fg": (0xEB, 0xDB, 0xB2),     # bullets
-    "muted": (0xA8, 0x99, 0x84),  # prompt box border
-    "field": (0x3C, 0x38, 0x36),  # prompt box fill (Gruvbox bg1)
+    "muted": (0xA8, 0x99, 0x84),  # lock glyph
+    "field": (0x32, 0x30, 0x2F),  # prompt field fill (Gruvbox bg0_s, R25)
+    "focus": (0x68, 0x9D, 0x6A),  # prompt field border (palette focus)
+    "error": (0xFB, 0x49, 0x34),  # border after a wrong passphrase (palette error)
 }
 SUPERSAMPLE = 8
 
@@ -51,7 +55,8 @@ def rnd(value: float) -> int:
 def geometry(height: int) -> dict:
     logo = rnd(0.24 * height)
     gap = rnd(0.54 * logo)
-    return {"logo": logo, "gap": gap, "badge": 2 * gap, "word_w": rnd(0.26 * height)}
+    return {"logo": logo, "gap": gap, "badge": 2 * gap, "word_w": rnd(0.26 * height),
+            "prompt_logo": rnd(0.21 * height)}
 
 
 def resize(image: Image.Image, size: tuple) -> Image.Image:
@@ -78,6 +83,11 @@ def wordmark(height: int, source: Image.Image) -> Image.Image:
     return resize(source, (width, rnd(source.height * width / source.width)))
 
 
+def prompt_logo(height: int, logo: Image.Image) -> Image.Image:
+    side = geometry(height)["prompt_logo"]
+    return resize(logo, (side, side))
+
+
 def main() -> int:
     logo = Image.open(LOGO).convert("RGBA")
     word = Image.open(WORDMARK).convert("RGBA")
@@ -85,9 +95,10 @@ def main() -> int:
     for height in LADDER:
         badge(height, logo).save(THEME / f"badge-{height}.png", optimize=True)
         wordmark(height, word).save(THEME / f"wordmark-{height}.png", optimize=True)
+        prompt_logo(height, logo).save(THEME / f"logo-{height}.png", optimize=True)
     for name, rgb in TILES.items():
         Image.new("RGB", (1, 1), rgb).save(THEME / f"{name}.png", optimize=True)
-    print(f"wrote {len(LADDER) * 2 + len(TILES)} images to {THEME.relative_to(ROOT)}")
+    print(f"wrote {len(LADDER) * 3 + len(TILES)} images to {THEME.relative_to(ROOT)}")
     return 0
 
 
