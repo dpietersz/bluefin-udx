@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Make the Vitta boot splash (files/vitta/usr/share/plymouth/themes/vitta) the
 # image's default Plymouth theme. Vitta-only: run from recipes/vitta-modules.yml
 # after the files/vitta overlay, before the initramfs module bakes it in.

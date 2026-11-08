@@ -671,18 +671,41 @@ jobs:
                 check_rpm plymouth-plugin-script
                 VITTA_PLY_PLUGINS=$(plymouth --get-splash-plugin-path 2>/dev/null || echo /usr/lib64/plymouth/)
                 check_file "${VITTA_PLY_PLUGINS}script.so"
-                VITTA_PLY_FILES="vitta.plymouth vitta.script band1.png band2.png band3.png band4.png fg.png muted.png field.png"
-                for VITTA_H in 720 768 800 900 1080 1200 1440 1600 1800 2160; do VITTA_PLY_FILES="$VITTA_PLY_FILES badge-$VITTA_H.png wordmark-$VITTA_H.png"; done
-                for VITTA_PLY_FILE in $VITTA_PLY_FILES; do check_file "/usr/share/plymouth/themes/vitta/$VITTA_PLY_FILE"; done
+                VITTA_THEME_DIR=/usr/share/plymouth/themes/vitta
+                VITTA_PLY_FILES=$(find "$VITTA_THEME_DIR" -maxdepth 1 -type f -printf "%f\n" | sort)
+                if [ -n "$VITTA_PLY_FILES" ]; then
+                    for VITTA_PLY_FILE in $VITTA_PLY_FILES; do check_file "$VITTA_THEME_DIR/$VITTA_PLY_FILE"; done
+                else
+                    echo "  FAIL  Vitta Plymouth theme has no files"
+                    FAIL=1
+                fi
                 VITTA_PLY_THEME=$(plymouth-set-default-theme 2>/dev/null || true)
                 if [ "$VITTA_PLY_THEME" = vitta ] && grep -qx "Theme=vitta" /usr/share/plymouth/plymouthd.defaults; then echo "  ok    default Plymouth theme vitta (plymouthd.defaults)"; else echo "  FAIL  default Plymouth theme is ${VITTA_PLY_THEME:-unset}, expected vitta from /usr/share/plymouth/plymouthd.defaults"; FAIL=1; fi
                 if grep -Eq "^[[:space:]]*Theme[[:space:]]*=" /etc/plymouth/plymouthd.conf 2>/dev/null; then echo "  FAIL  /etc/plymouth/plymouthd.conf sets Theme=, outranking plymouthd.defaults"; FAIL=1; else echo "  ok    /etc/plymouth/plymouthd.conf leaves Theme= to the defaults"; fi
-                VITTA_INITRAMFS=$(ls /usr/lib/modules/*/initramfs.img 2>/dev/null | head -n 1)
-                VITTA_LSINITRD=$(lsinitrd "$VITTA_INITRAMFS" 2>/dev/null || true)
-                for VITTA_INITRD_FILE in usr/share/plymouth/themes/vitta/vitta.plymouth usr/share/plymouth/themes/vitta/vitta.script usr/share/plymouth/themes/vitta/badge-1080.png usr/share/plymouth/themes/vitta/wordmark-1080.png usr/share/plymouth/themes/vitta/band1.png usr/lib64/plymouth/script.so usr/lib64/plymouth/label-freetype.so usr/share/fonts/Plymouth.ttf; do
+                VITTA_INITRAMFS=""
+                VITTA_INITRAMFS_CANDIDATES=0
+                for VITTA_KVER in $(rpm -q --qf "%{VERSION}-%{RELEASE}.%{ARCH}\n" kernel-core 2>/dev/null || true); do
+                    if [ -f "/usr/lib/modules/$VITTA_KVER/vmlinuz" ]; then
+                        VITTA_INITRAMFS_CANDIDATES=$((VITTA_INITRAMFS_CANDIDATES + 1))
+                        VITTA_INITRAMFS="/usr/lib/modules/$VITTA_KVER/initramfs.img"
+                    fi
+                done
+                if [ "$VITTA_INITRAMFS_CANDIDATES" -eq 1 ] && [ -f "$VITTA_INITRAMFS" ]; then
+                    echo "  ok    initramfs for installed kernel: $VITTA_INITRAMFS"
+                    VITTA_LSINITRD=$(lsinitrd "$VITTA_INITRAMFS" 2>/dev/null || true)
+                else
+                    echo "  FAIL  expected one installed kernel with vmlinuz and initramfs, found $VITTA_INITRAMFS_CANDIDATES"
+                    FAIL=1
+                    VITTA_LSINITRD=""
+                fi
+                for VITTA_PLY_FILE in $VITTA_PLY_FILES; do
+                    VITTA_INITRD_FILE="usr/share/plymouth/themes/vitta/$VITTA_PLY_FILE"
                     if printf "%s\n" "$VITTA_LSINITRD" | grep -qF " $VITTA_INITRD_FILE"; then echo "  ok    initramfs has $VITTA_INITRD_FILE"; else echo "  FAIL  initramfs ${VITTA_INITRAMFS:-?} lacks $VITTA_INITRD_FILE"; FAIL=1; fi
                 done
-                if lsinitrd -f usr/share/plymouth/plymouthd.defaults "$VITTA_INITRAMFS" 2>/dev/null | grep -qx "Theme=vitta"; then echo "  ok    initramfs plymouthd.defaults: Theme=vitta"; else echo "  FAIL  initramfs plymouthd.defaults does not select vitta"; FAIL=1; fi
+                for VITTA_INITRD_FILE in usr/lib64/plymouth/script.so usr/lib64/plymouth/label-freetype.so usr/share/fonts/Plymouth.ttf; do
+                    if printf "%s\n" "$VITTA_LSINITRD" | grep -qF " $VITTA_INITRD_FILE"; then echo "  ok    initramfs has $VITTA_INITRD_FILE"; else echo "  FAIL  initramfs ${VITTA_INITRAMFS:-?} lacks $VITTA_INITRD_FILE"; FAIL=1; fi
+                done
+                if [ -n "$VITTA_LSINITRD" ] && lsinitrd -f usr/share/plymouth/plymouthd.defaults "$VITTA_INITRAMFS" 2>/dev/null | grep -qx "Theme=vitta"; then echo "  ok    initramfs plymouthd.defaults: Theme=vitta"; else echo "  FAIL  initramfs plymouthd.defaults does not select vitta"; FAIL=1; fi
                 # The rebuild must keep what makes the initramfs boot an ostree deployment at all.
                 for VITTA_DRACUT_MOD in ostree systemd plymouth; do
                     if printf "%s\n" "$VITTA_LSINITRD" | sed -n "/^dracut modules:/,/^=====/p" | grep -qx "$VITTA_DRACUT_MOD"; then echo "  ok    initramfs dracut module $VITTA_DRACUT_MOD"; else echo "  FAIL  initramfs lacks dracut module $VITTA_DRACUT_MOD"; FAIL=1; fi
