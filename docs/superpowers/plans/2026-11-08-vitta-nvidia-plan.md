@@ -1,6 +1,6 @@
 # Vitta for the P14s (NVIDIA variant) — plan
 
-Status: **plan only, not started** (owner, 2026-11-08). Builds on everything
+Status: **plan approved with owner decisions (§6), not started** (owner, 2026-11-08). Builds on everything
 proven on the T580 (`vitta`, spec `2026-11-06-vitta-design.md`, boot splash
 `2026-11-07-…`, LUKS prompt `2026-11-08-…`). Execution starts only after the
 owner answers the open decisions in §6 and approves this plan.
@@ -120,17 +120,15 @@ dotfiles (`isBluefin` gates become legacy-only).
 | VM regressions (libvirt group, SELinux relabel, VirtioFS) | reuse `vitta-groups` + `vitta-libvirt-relabel`; run VM before switching daily use |
 | kargs duplication from kargs.d on a rebased machine | verify bootc behaviour in CI/VM first; else ship kargs only for fresh installs via ISO |
 
-## 6. Open decisions for the owner
+## 6. Owner decisions (2026-11-08)
 
-1. **Image name:** `vitta-nvidia` (my proposal, mirrors `bluefin-udx-nvidia`) — ok?
-2. **Fingerprint at the login screen**, or only at the lock screen (password at
-   login keeps the keyring model simpler)?
-3. **Local layers** `equibop` / `fuse-libs`: carry them as layers, bake into the
-   image, or move to a toolbox?
-4. **Boot splash badge:** same Fedora + Lenovo as the T580, or a ThinkPad/RTX
-   variant?
-5. **Timing of Phase 6** (retire bluefin-udx): right after the P14s is on
-   `vitta-nvidia:stable`, or keep bluefin-udx as a fallback for a while?
+| # | Decision |
+|---|---|
+| D1 | Image name **`vitta-nvidia`** (`ghcr.io/dpietersz/vitta-nvidia`, os-release `VARIANT_ID=vitta-nvidia`, `ID=vitta` so dotfiles `isVitta` stays true). |
+| D2 | **Fingerprint at the login screen too** (greetd greeter), not only the lock screen. Password must always work in parallel. |
+| D3 | `equibop` and `fuse-libs` stay **local rpm-ostree layers** (carried by `rpm-ostree rebase`). |
+| D4 | **Same boot splash badge** as the T580 (grungy Fedora logo + Lenovo wordmark). |
+| D5 | **Keep `bluefin-udx` / `bluefin-udx-nvidia` as a fallback for a while** after the P14s is on `vitta-nvidia:stable`; Phase 6 is deferred until the owner asks. |
 
 ## 7. Estimate
 Phases 0–4 ≈ 5–7 working days of agent time with CI, plus owner time for the
