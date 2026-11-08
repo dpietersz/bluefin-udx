@@ -33,6 +33,15 @@ def load_shadow_sync():
 
 
 class VittaOverlayTests(unittest.TestCase):
+    def test_ci_installs_and_checks_cosign_before_publishing(self):
+        workflow = (ROOT / ".github/workflows/build.yml").read_text()
+        install = workflow.index("- name: Install cosign")
+        push = workflow.index("- name: Tag and push to ghcr")
+        self.assertLess(install, push)
+        version = workflow.index("cosign version", install, push)
+        self.assertLess(version, push)
+        self.assertNotIn("image pushed unsigned", workflow)
+
     def test_greeter_cage_uses_one_output(self):
         # cage's default -m extend spans every monitor: a docked laptop would
         # centre the login card on the seam between screens.
