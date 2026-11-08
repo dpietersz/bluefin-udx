@@ -22,6 +22,8 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 VITTA = ROOT / "files/vitta"
 SHADOW_SYNC = VITTA / "usr/libexec/vitta/vitta-shadow-sync"
+IDLE_HELPER = VITTA / "usr/libexec/vitta/vitta-greeter-idle"
+IDLE_OVERLAY = VITTA / "usr/share/vitta/greeter/IdleOverlay.qml"
 
 
 def load_shadow_sync():
@@ -41,6 +43,43 @@ class VittaOverlayTests(unittest.TestCase):
         version = workflow.index("cosign version", install, push)
         self.assertLess(version, push)
         self.assertNotIn("image pushed unsigned", workflow)
+
+    def test_greeter_idle_schedule_blanks_then_suspends_only_on_battery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            fake_bin = tmp / "bin"
+            fake_bin.mkdir()
+            log = tmp / "swayidle-args"
+            swayidle = fake_bin / "swayidle"
+            swayidle.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$VITTA_TEST_LOG"\n')
+            swayidle.chmod(0o755)
+            env = os.environ | {"PATH": f"{fake_bin}:{os.environ['PATH']}", "VITTA_TEST_LOG": str(log)}
+
+            started = os.spawnve(os.P_WAIT, str(IDLE_HELPER), [str(IDLE_HELPER)], env)
+            self.assertEqual(started, 0)
+            self.assertEqual(
+                log.read_text().splitlines(),
+                ["-w", "timeout", "300", f"{IDLE_HELPER} --blank", "resume", f"{IDLE_HELPER} --resume", "timeout", "900", f"{IDLE_HELPER} --suspend"],
+            )
+
+            log.unlink()
+            preview = env | {"VITTA_GREETER_PREVIEW": "1"}
+            previewed = os.spawnve(os.P_WAIT, str(IDLE_HELPER), [str(IDLE_HELPER)], preview)
+            self.assertEqual(previewed, 0)
+            self.assertFalse(log.exists(), "preview must not start an idle or suspend path")
+
+        script = IDLE_HELPER.read_text()
+        self.assertIn("/sys/class/power_supply", script)
+        self.assertIn("AC*/online", script)
+        self.assertIn("BAT*/status", script)
+        self.assertIn("systemctl suspend", script)
+
+    def test_greeter_idle_overlay_is_black_and_runs_from_the_greeter_shell(self):
+        overlay = IDLE_OVERLAY.read_text()
+        self.assertIn("FloatingWindow", overlay)
+        self.assertRegex(overlay, r"color:\s*[\"']black[\"']")
+        shell = (VITTA / "usr/share/vitta/greeter/shell.qml").read_text()
+        self.assertIn("vitta-greeter-idle", shell)
 
     def test_greeter_cage_uses_one_output(self):
         # cage's default -m extend spans every monitor: a docked laptop would
