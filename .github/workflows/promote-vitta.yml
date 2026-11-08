@@ -1,0 +1,159 @@
+name: Promote Vitta
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Source tag (testing, YYYYMMDD, sha7) or sha256:<digest>"
+        required: true
+        default: testing
+        type: string
+      confirm:
+        description: "Type promote to retag the verified source as stable"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  promote:
+    name: Verify and promote Vitta
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Require explicit confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRM" != "promote" ]]; then
+            echo "::error::Type promote in the confirm input to retag Vitta as stable"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Keep the signer identical to build.yml: a pinned binary, checksum
+      # verified before it can verify or sign a registry artifact.
+      - name: Install cosign
+        env:
+          COSIGN_VERSION: v2.6.0
+          COSIGN_SHA256: ea5c65f99425d6cfbb5c4b5de5dac035f14d09131c1a0ea7c7fc32eab39364f9
+        run: |
+          set -euo pipefail
+          COSIGN_BIN="$RUNNER_TEMP/cosign-linux-amd64"
+          curl --fail --location --retry 5 --retry-delay 2 --retry-all-errors \
+            --connect-timeout 15 --max-time 120 \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64" \
+            --output "$COSIGN_BIN"
+          echo "${COSIGN_SHA256}  ${COSIGN_BIN}" | sha256sum --check --strict
+          install -D -m 0755 "$COSIGN_BIN" "$HOME/.local/bin/cosign"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/cosign" version
+
+      - name: Require signing key
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "${COSIGN_PRIVATE_KEY:-}" || {
+            echo "::error::SIGNING_SECRET is required to promote Vitta"
+            exit 1
+          }
+
+      - name: Log in to ghcr
+        id: registry
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}/vitta
+        run: |
+          set -euo pipefail
+          echo "$GHCR_TOKEN" | skopeo login ghcr.io \
+            --username "$GHCR_USER" --password-stdin --authfile /tmp/auth.json
+          mkdir -p "$HOME/.docker"
+          cp /tmp/auth.json "$HOME/.docker/config.json"
+          IMAGE=$(printf '%s' "$IMAGE_REGISTRY" | tr '[:upper:]' '[:lower:]')
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve and verify source digest
+        id: source
+        env:
+          IMAGE: ${{ steps.registry.outputs.image }}
+          SOURCE: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$SOURCE" =~ ^(testing|[0-9a-f]{7}|[0-9]{8}|sha256:[0-9a-f]{64})$ ]]; then
+            echo "::error::source must be testing, a seven-character SHA, a YYYYMMDD tag, or sha256:<64 hex characters>"
+            exit 1
+          fi
+
+          if [[ "$SOURCE" == sha256:* ]]; then
+            SOURCE_REF="${IMAGE}@${SOURCE}"
+          else
+            SOURCE_REF="${IMAGE}:${SOURCE}"
+          fi
+          SOURCE_DIGEST=$(skopeo inspect --authfile /tmp/auth.json \
+            --format '{{.Digest}}' "docker://${SOURCE_REF}")
+          SOURCE_IMAGE="${IMAGE}@${SOURCE_DIGEST}"
+          echo "source_digest=${SOURCE_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "source_image=${SOURCE_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "Resolved source: ${SOURCE_IMAGE}"
+
+          cosign verify --key cosign.pub "${SOURCE_IMAGE}"
+
+      - name: Copy verified digest to stable
+        env:
+          IMAGE: ${{ steps.registry.outputs.image }}
+          SOURCE_IMAGE: ${{ steps.source.outputs.source_image }}
+        run: |
+          set -euo pipefail
+          skopeo copy --all --authfile /tmp/auth.json \
+            "docker://${SOURCE_IMAGE}" "docker://${IMAGE}:stable"
+
+      - name: Confirm stable points to the verified digest
+        id: stable
+        env:
+          IMAGE: ${{ steps.registry.outputs.image }}
+          SOURCE_DIGEST: ${{ steps.source.outputs.source_digest }}
+        run: |
+          set -euo pipefail
+          STABLE_DIGEST=$(skopeo inspect --authfile /tmp/auth.json \
+            --format '{{.Digest}}' "docker://${IMAGE}:stable")
+          echo "stable_digest=${STABLE_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "stable_image=${IMAGE}@${STABLE_DIGEST}" >> "$GITHUB_OUTPUT"
+          if [[ "$SOURCE_DIGEST" != "$STABLE_DIGEST" ]]; then
+            echo "::error::stable digest differs from the verified source"
+            echo "source digest: $SOURCE_DIGEST"
+            echo "stable digest: $STABLE_DIGEST"
+            exit 1
+          fi
+
+      - name: Sign stable digest
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          COSIGN_PASSWORD: ""
+          STABLE_IMAGE: ${{ steps.stable.outputs.stable_image }}
+        run: |
+          set -euo pipefail
+          if ! cosign sign --yes --key env://COSIGN_PRIVATE_KEY "$STABLE_IMAGE"; then
+            echo "cosign sign returned non-zero; accepting only an existing valid signature"
+            cosign verify --key cosign.pub "$STABLE_IMAGE"
+          fi
+
+      - name: Verify stable digest
+        env:
+          SOURCE_DIGEST: ${{ steps.source.outputs.source_digest }}
+          STABLE_DIGEST: ${{ steps.stable.outputs.stable_digest }}
+          STABLE_IMAGE: ${{ steps.stable.outputs.stable_image }}
+        run: |
+          set -euo pipefail
+          cosign verify --key cosign.pub "$STABLE_IMAGE"
+          echo "source digest: $SOURCE_DIGEST"
+          echo "stable digest: $STABLE_DIGEST"
+          test "$SOURCE_DIGEST" = "$STABLE_DIGEST"
+          echo "Promoted Vitta without rebuilding: source digest == stable digest"

@@ -114,7 +114,13 @@ Check monthly-ish, not only quarterly — subscribe to https://docs.projectbluef
 - [ ] **Maintainer pulse.** Non-Renovate commits to `ublue-os/bluefin` in the last 60 days, open-issue response, blog posts mentioning Classic. Silence is the earliest signal that a fallback base decision is due.
 - [ ] Is `bluefin-dx:stable` still the right channel? If you've been on `:latest` mentally but `:stable` in recipe, reconcile.
 
-Vitta remains `:testing` until the T580 acceptance checklist is complete. **Once the owner promotes Vitta to `:stable`, the Vitta/base-main checks below replace this Bluefin-Classic watch for the T580**; retain the Bluefin checks while either bluefin-udx image still uses that upstream base.
+Vitta `:stable` is an owner-promoted release. The Vitta/base-main checks below replace this Bluefin-Classic watch for the T580; retain the Bluefin checks while either bluefin-udx image still uses that upstream base.
+
+**Vitta promotion (only after owner review of a known-good testing, date, or SHA tag):**
+- [ ] Confirm the candidate digest is one that passed the T580 acceptance checklist and remains available in ghcr.
+- [ ] Run `gh workflow run promote-vitta.yml -f source=testing -f confirm=promote` (replace `testing` with the reviewed date tag, seven-character SHA tag, or full `sha256:` digest when pinning a specific candidate).
+- [ ] Confirm the workflow reports `source digest == stable digest`, including successful source and stable cosign verification.
+- [ ] Never promote from `build.yml`: CI continues to publish only `:testing`, date, and commit-SHA Vitta tags. Do not dispatch promotion merely to test it.
 
 **Vitta / `base-main` health (quarterly after promotion; useful while testing):**
 - [ ] Check `ghcr.io/ublue-os/base-main:44` freshness and its Fedora-major cadence with `skopeo inspect --no-tags docker://ghcr.io/ublue-os/base-main:44`; keep Vitta pinned to an intentional major and run the Vitta leg of `scripts/check-fedora-next.sh` before changing it.

@@ -21,6 +21,7 @@ from unittest import mock
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 VITTA = ROOT / "files/vitta"
+PROMOTION_WORKFLOW = ROOT / ".github/workflows/promote-vitta.yml"
 SHADOW_SYNC = VITTA / "usr/libexec/vitta/vitta-shadow-sync"
 IDLE_HELPER = VITTA / "usr/libexec/vitta/vitta-greeter-idle"
 IDLE_OVERLAY = VITTA / "usr/share/vitta/greeter/IdleOverlay.qml"
@@ -35,6 +36,29 @@ def load_shadow_sync():
 
 
 class VittaOverlayTests(unittest.TestCase):
+    def test_vitta_promotion_workflow_verifies_then_retags_one_digest(self):
+        workflow = PROMOTION_WORKFLOW.read_text()
+        self.assertRegex(workflow, r"(?m)^  workflow_dispatch:$")
+        self.assertNotRegex(workflow, r"(?m)^  (?:push|pull_request):")
+        self.assertIn("default: testing", workflow)
+        self.assertIn('"$CONFIRM" != "promote"', workflow)
+        self.assertIn("contents: read", workflow)
+        self.assertIn("packages: write", workflow)
+        self.assertIn("COSIGN_VERSION: v2.6.0", workflow)
+        self.assertIn("COSIGN_SHA256: ea5c65f99425d6cfbb5c4b5de5dac035f14d09131c1a0ea7c7fc32eab39364f9", workflow)
+        self.assertIn("--retry 5 --retry-delay 2 --retry-all-errors", workflow)
+        self.assertIn("skopeo copy --all", workflow)
+
+        source_verify = workflow.index('cosign verify --key cosign.pub "${SOURCE_IMAGE}"')
+        copy = workflow.index("skopeo copy --all")
+        digest_compare = workflow.index('"$SOURCE_DIGEST" != "$STABLE_DIGEST"')
+        sign = workflow.index('cosign sign --yes --key env://COSIGN_PRIVATE_KEY "$STABLE_IMAGE"')
+        stable_verify = workflow.rindex('cosign verify --key cosign.pub "$STABLE_IMAGE"')
+        self.assertLess(source_verify, copy)
+        self.assertLess(copy, digest_compare)
+        self.assertLess(digest_compare, sign)
+        self.assertLess(sign, stable_verify)
+
     def test_ci_installs_and_checks_cosign_before_publishing(self):
         workflow = (ROOT / ".github/workflows/build.yml").read_text()
         install = workflow.index("- name: Install cosign")
