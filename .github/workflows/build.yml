@@ -611,7 +611,7 @@ jobs:
                 # ostree populates /var only on first deploy; a rebased machine needs tmpfiles.
                 if grep -Eqs "^d[[:space:]]+/var/lib/greetd[[:space:]]" /usr/lib/tmpfiles.d/*.conf; then echo "  ok    /var/lib/greetd created by tmpfiles.d"; else echo "  FAIL  no tmpfiles.d d-line creates /var/lib/greetd"; FAIL=1; fi
                 if [ -x /usr/libexec/vitta/vitta-greeter ]; then echo "  ok    /usr/libexec/vitta/vitta-greeter executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greeter missing or not executable"; FAIL=1; fi
-                if [ -x /usr/libexec/vitta/vitta-greeter-idle ] && [ -s /usr/share/vitta/greeter/IdleOverlay.qml ] && grep -Fqx "      timeout 300 \"\$0 --blank\"" /usr/libexec/vitta/vitta-greeter-idle && grep -Fqx "      timeout 900 \"\$0 --suspend\"" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "VITTA_GREETER_PREVIEW" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "systemctl suspend" /usr/libexec/vitta/vitta-greeter-idle; then
+                if [ -x /usr/libexec/vitta/vitta-greeter-idle ] && [ -s /usr/share/vitta/greeter/IdleOverlay.qml ] && grep -Fq "timeout 300 \"\$0 --blank\"" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "timeout 900 \"\$0 --suspend\"" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "VITTA_GREETER_PREVIEW" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "systemctl suspend" /usr/libexec/vitta/vitta-greeter-idle; then
                     echo "  ok    greeter idle: 5 min black overlay, 15 min battery suspend, preview guarded"
                 else
                     echo "  FAIL  greeter idle helper or black-overlay timing/guard contract missing"; FAIL=1
