@@ -10,6 +10,13 @@ ShellRoot {
     Theme { id: theme }
     Auth { id: auth }
 
+    // Quickshell 0.2.1 has no IdleMonitor despite Cage exposing
+    // ext-idle-notify-v1, so hand idle timing to swayidle after this client
+    // has connected to Cage. The helper independently rejects preview mode.
+    Component.onCompleted: {
+        if (!auth.preview) Quickshell.execDetached(["/usr/libexec/vitta/vitta-greeter-idle"])
+    }
+
     FloatingWindow {
         id: window
 

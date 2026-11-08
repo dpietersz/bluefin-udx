@@ -199,7 +199,8 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
             FAIL=1
         fi
         echo "Vitta greeter (greetd -> cage -> Quickshell):"
-        for p in greetd cage quickshell; do check_rpm "$p"; done
+        for p in greetd cage quickshell swayidle; do check_rpm "$p"; done
+        check_bin swayidle
         # Footer source (vitta <IMAGE_VERSION>); informational.
         grep -E "^(IMAGE_VERSION|VERSION_ID)=" /etc/os-release | sed "s/^/  info  /" || true
         for VITTA_GREETD_LINE in "vt = 1" "command = \"/usr/libexec/vitta/vitta-greeter\"" "user = \"greetd\""; do
@@ -241,6 +242,11 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
         # ostree populates /var only on first deploy; a rebased machine needs tmpfiles.
         if grep -Eqs "^d[[:space:]]+/var/lib/greetd[[:space:]]" /usr/lib/tmpfiles.d/*.conf; then echo "  ok    /var/lib/greetd created by tmpfiles.d"; else echo "  FAIL  no tmpfiles.d d-line creates /var/lib/greetd"; FAIL=1; fi
         if [ -x /usr/libexec/vitta/vitta-greeter ]; then echo "  ok    /usr/libexec/vitta/vitta-greeter executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greeter missing or not executable"; FAIL=1; fi
+        if [ -x /usr/libexec/vitta/vitta-greeter-idle ] && [ -s /usr/share/vitta/greeter/IdleOverlay.qml ] && grep -Fqx "      timeout 300 \"\$0 --blank\"" /usr/libexec/vitta/vitta-greeter-idle && grep -Fqx "      timeout 900 \"\$0 --suspend\"" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "VITTA_GREETER_PREVIEW" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "systemctl suspend" /usr/libexec/vitta/vitta-greeter-idle; then
+            echo "  ok    greeter idle: 5 min black overlay, 15 min battery suspend, preview guarded"
+        else
+            echo "  FAIL  greeter idle helper or black-overlay timing/guard contract missing"; FAIL=1
+        fi
         # -m last: one output only; the default -m extend centres the card across a docked layout.
         # -d: cage answers xdg-decoration server_side, else Qt frames the greeter in white edges.
         if grep -Eq "^exec cage -d -s -m last -- quickshell " /usr/libexec/vitta/vitta-greeter 2>/dev/null; then echo "  ok    vitta-greeter runs cage -d -s -m last"; else echo "  FAIL  vitta-greeter must exec cage -d -s -m last (no client decoration frame, single output when docked)"; FAIL=1; fi

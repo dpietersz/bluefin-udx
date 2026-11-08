@@ -1,0 +1,76 @@
+#!/bin/bash
+# vitta-greeter-idle — idle actions for the greetd/cage login session.
+#
+# Cage 0.3.1 exposes ext-idle-notify-v1 but not output-power-management-v1,
+# so swayidle detects seat inactivity and this helper shows a black Quickshell
+# window after five minutes. Cage reports the next key or pointer activity to
+# swayidle, which removes the window. At 15 minutes, suspend only if a battery
+# exists and no AC adapter reports online.
+set -euo pipefail
+
+readonly OVERLAY_QML=/usr/share/vitta/greeter/IdleOverlay.qml
+readonly POWER_SUPPLY_ROOT="${VITTA_POWER_SUPPLY_ROOT:-/sys/class/power_supply}"
+
+if [ "${VITTA_GREETER_PREVIEW:-}" = "1" ]; then
+  exit 0
+fi
+
+pid_file() {
+  printf '%s/vitta-greeter-idle-overlay.pid\n' "${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}"
+}
+
+stop_overlay() {
+  local file pid command
+  file=$(pid_file)
+  [ -r "$file" ] || return 0
+  pid=$(<"$file")
+  rm -f "$file"
+  case "$pid" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  [ -r "/proc/$pid/cmdline" ] || return 0
+  command=$(tr '\0' ' ' < "/proc/$pid/cmdline")
+  if [[ "$command" == *"$OVERLAY_QML"* ]]; then
+    kill "$pid" 2>/dev/null || true
+  fi
+}
+
+start_overlay() {
+  local file
+  stop_overlay
+  file=$(pid_file)
+  quickshell -p "$OVERLAY_QML" >/dev/null 2>&1 &
+  printf '%s\n' "$!" > "$file"
+}
+
+on_battery() {
+  local online status has_battery=0
+  for online in "$POWER_SUPPLY_ROOT"/AC*/online; do
+    [ -r "$online" ] || continue
+    [ "$(<"$online")" = "1" ] && return 1
+  done
+  for status in "$POWER_SUPPLY_ROOT"/BAT*/status; do
+    [ -r "$status" ] && has_battery=1
+  done
+  [ "$has_battery" = "1" ]
+}
+
+case "${1:-watch}" in
+  watch)
+    exec swayidle -w \
+      timeout 300 "$0 --blank" \
+      resume "$0 --resume" \
+      timeout 900 "$0 --suspend"
+    ;;
+  --blank) start_overlay ;;
+  --resume) stop_overlay ;;
+  --suspend)
+    if on_battery; then
+      systemctl suspend
+    fi
+    ;;
+  *)
+    echo "usage: $0 [watch|--blank|--resume|--suspend]" >&2
+    exit 2
+    ;;
+esac
