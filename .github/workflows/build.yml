@@ -715,6 +715,7 @@ jobs:
                     if printf "%s\n" "$VITTA_LSINITRD" | grep -qF " $VITTA_INITRD_FILE"; then echo "  ok    initramfs has $VITTA_INITRD_FILE"; else echo "  FAIL  initramfs ${VITTA_INITRAMFS:-?} lacks $VITTA_INITRD_FILE"; FAIL=1; fi
                 done
                 if [ -n "$VITTA_LSINITRD" ] && lsinitrd -f usr/share/plymouth/plymouthd.defaults "$VITTA_INITRAMFS" 2>/dev/null | grep -qx "Theme=vitta"; then echo "  ok    initramfs plymouthd.defaults: Theme=vitta"; else echo "  FAIL  initramfs plymouthd.defaults does not select vitta"; FAIL=1; fi
+                if [ -n "$VITTA_LSINITRD" ] && ! printf "%s\n" "$VITTA_LSINITRD" | grep -q "v4l2loopback"; then echo "  ok    initramfs omits v4l2loopback (loads from real root with video_nr=10)"; else echo "  FAIL  initramfs contains v4l2loopback or was unreadable: /etc/modprobe.d video_nr=10 would be bypassed"; FAIL=1; fi
                 # label-freetype loads only these two paths: Plymouth-monospace.ttf for the prompt text, Plymouth.ttf otherwise.
                 for VITTA_FONT_LINK in "Plymouth-monospace.ttf -> /usr/share/fonts/monaspace-neon/MonaspaceNeon-Regular.otf" "Plymouth.ttf -> /usr/share/fonts/monaspace-neon/MonaspaceNeon-Bold.otf"; do
                     if printf "%s\n" "$VITTA_LSINITRD" | grep -qF " usr/share/fonts/$VITTA_FONT_LINK"; then echo "  ok    initramfs font link $VITTA_FONT_LINK"; else echo "  FAIL  initramfs ${VITTA_INITRAMFS:-?} lacks font link $VITTA_FONT_LINK"; FAIL=1; fi
