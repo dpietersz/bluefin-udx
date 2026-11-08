@@ -95,6 +95,19 @@ class BootsplashTests(unittest.TestCase):
         for name in sorted(names):
             self.assertTrue((THEME_DIR / name).is_file(), name)
 
+    def test_ladder_image_loader_falls_back_to_the_nearest_available_asset(self):
+        # Image() returns NULL for a missing file. The loader must try every
+        # ladder entry by distance from the screen height before layout uses it.
+        self.assertIn("fun ladder_image (kind, h)", self.code)
+        self.assertIn("local.distance = ladder[local.i] - h;", self.code)
+        self.assertIn("if (local.distance < 0)\n            local.distance = -local.distance;", self.code)
+        self.assertIn("local.best < 0 || local.distance < local.best_distance", self.code)
+        self.assertIn("local.used[local.best] = 1;", self.code)
+        self.assertIn('local.image = Image (kind + "-" + ladder[local.best] + ".png");', self.code)
+        self.assertIn("if (local.image)\n        return local.image;", self.code)
+        self.assertIn('local.image = ladder_image ("badge", screen.h);', self.code)
+        self.assertIn('local.image = ladder_image ("wordmark", screen.h);', self.code)
+
     # ---- palette (= login screen, palette.toml [dark]) -------------------------
     def test_script_palette_matches_palette_toml(self):
         for key in ("bg", "fg", "muted"):
@@ -238,6 +251,7 @@ class BootsplashTests(unittest.TestCase):
 
     def test_default_theme_script_targets_plymouthd_defaults(self):
         text = (ROOT / "files/scripts/vitta-plymouth-theme.sh").read_text()
+        self.assertEqual(text.splitlines()[0], "#!/bin/bash")
         self.assertIn("DEFAULTS=/usr/share/plymouth/plymouthd.defaults", text)
         self.assertIn("sed -i 's/^Theme=.*/Theme=vitta/' \"${DEFAULTS}\"", text)
         self.assertNotIn("plymouth-set-default-theme vitta", text)
@@ -246,8 +260,11 @@ class BootsplashTests(unittest.TestCase):
         needles = (
             "check_rpm plymouth-plugin-script",
             'grep -qx "Theme=vitta" /usr/share/plymouth/plymouthd.defaults',
+            'for VITTA_KVER in $(rpm -q --qf "%{VERSION}-%{RELEASE}.%{ARCH}\\n" kernel-core 2>/dev/null || true); do',
+            '"/usr/lib/modules/$VITTA_KVER/vmlinuz"',
+            'VITTA_INITRAMFS_CANDIDATES=$((VITTA_INITRAMFS_CANDIDATES + 1))',
+            'find "$VITTA_THEME_DIR" -maxdepth 1 -type f -printf "%f\\n" | sort',
             'VITTA_LSINITRD=$(lsinitrd "$VITTA_INITRAMFS" 2>/dev/null || true)',
-            "usr/share/plymouth/themes/vitta/vitta.script",
             "usr/lib64/plymouth/script.so",
             'lsinitrd -f usr/share/plymouth/plymouthd.defaults "$VITTA_INITRAMFS"',
             "for VITTA_DRACUT_MOD in ostree systemd plymouth; do",
@@ -260,6 +277,7 @@ class BootsplashTests(unittest.TestCase):
             block = text[start:end]
             for needle in needles:
                 self.assertIn(needle, block, f"{gate.name}: {needle}")
+            self.assertNotIn("head -n 1", block, f"{gate.name}: initramfs must not be selected by glob order")
             self.assertNotIn("'", block, f"{gate.name}: smoke shell is single-quoted")
             blocks.append([line.strip() for line in block.splitlines()])
         self.assertEqual(blocks[0], blocks[1], "CI and local smoke gates drifted")
