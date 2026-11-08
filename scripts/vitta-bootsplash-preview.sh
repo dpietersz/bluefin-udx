@@ -10,7 +10,8 @@
 # script refuses to start if any DRM/fbdev/VT device is visible, so this can
 # never take over the host console.
 #
-# Env: MAIN_SIZE (default 1920x1080), EXTRA_SIZES (space separated).
+# Env: MAIN_SIZE (default 1920x1080), EXTRA_SIZES (space separated),
+#      FONTLESS=1 (no usable font: proves the prompt still takes a passphrase).
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -23,6 +24,7 @@ podman build -q -t "$IMAGE" -f "$ROOT/scripts/bootsplash-preview/Containerfile" 
 podman run --rm --network=none \
   -e MAIN_SIZE="${MAIN_SIZE:-1920x1080}" \
   ${EXTRA_SIZES+-e EXTRA_SIZES="$EXTRA_SIZES"} \
+  -e FONTLESS="${FONTLESS:-0}" \
   -v "$ROOT/files/vitta/usr/share/plymouth/themes/vitta:/theme:ro,z" \
   -v "$ROOT/scripts/bootsplash-preview/render.sh:/render.sh:ro,z" \
   -v "$OUT:/out:z" \

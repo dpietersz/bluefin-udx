@@ -8,6 +8,27 @@ FROM registry.fedoraproject.org/fedora:${FEDORA}
 RUN dnf -y install --setopt=install_weak_deps=False \
       plymouth plymouth-plugin-script plymouth-plugin-label plymouth-devel \
       xorg-x11-server-Xvfb xdotool xwd ImageMagick \
-      python3-pillow python3-numpy \
+      python3-pillow python3-numpy unzip \
       google-noto-sans-vf-fonts google-noto-sans-mono-vf-fonts fontconfig \
     && dnf clean all
+# Monaspace Neon Regular + Bold, the same pinned release as
+# files/scripts/install-monaspace-neon.sh (tests/test_vitta_bootsplash.py keeps
+# URL and checksum in sync). render.sh links them the way the
+# vitta-plymouth-font dracut module does in the initramfs.
+ARG MONASPACE_URL=https://github.com/githubnext/monaspace/releases/download/v1.400/monaspace-static-v1.400.zip
+ARG MONASPACE_SHA256=ab66d71be751495f679727332a3345597943bd4d7beebca03f5cde04bf994de7
+# Same file through the REST API asset endpoint, for when the release download
+# URL itself is failing (seen: persistent 504s). The checksum decides either way.
+ARG MONASPACE_API_ASSET=https://api.github.com/repos/githubnext/monaspace/releases/assets/383198921
+RUN { curl -fsSL --retry 3 --retry-all-errors -o /tmp/monaspace.zip "${MONASPACE_URL}" \
+      || curl -fsSL --retry 3 --retry-all-errors -H "Accept: application/octet-stream" \
+           -o /tmp/monaspace.zip "${MONASPACE_API_ASSET}"; } \
+    && printf "%s  %s\n" "${MONASPACE_SHA256}" /tmp/monaspace.zip | sha256sum -c - \
+    && install -d /usr/share/fonts/monaspace-neon \
+    && for f in Regular Bold; do \
+         unzip -p /tmp/monaspace.zip "Static Fonts/Monaspace Neon/MonaspaceNeon-$f.otf" \
+           > "/usr/share/fonts/monaspace-neon/MonaspaceNeon-$f.otf"; \
+       done \
+    && rm /tmp/monaspace.zip \
+    && test -s /usr/share/fonts/monaspace-neon/MonaspaceNeon-Regular.otf \
+    && test -s /usr/share/fonts/monaspace-neon/MonaspaceNeon-Bold.otf
