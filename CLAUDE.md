@@ -87,7 +87,7 @@ files/
     usr/lib/environment.d/50-electron-keyring.conf  # Forces :GNOME into XDG_CURRENT_DESKTOP for Electron keyring detection
     usr/lib/pki/containers/{bluefin-udx,bluefin-udx-nvidia}.pub  # cosign pubkeys baked into image
     usr/share/wayland-sessions/niri.desktop      # Override DesktopNames=niri → niri;GNOME for Electron password-store detection
-  vitta/                  # Vitta-only overlay (greeter, theme, Plymouth splash, repos, services)
+  vitta/                  # Vitta-only overlay (greeter, theme, Plymouth splash + LUKS prompt and its dracut font module, repos, services)
 scripts/
   local-build-test.sh     # Local mirror of the CI smoke-boot gate (Phase checks live in here)
   check-fedora-next.sh    # Resolves bluefin and Vitta recipe sets via RECIPES/BASE_IMAGE env
