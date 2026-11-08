@@ -1099,6 +1099,39 @@ jobs:
       # ----------------------------------------------------------------------
       # Push (only on main, only after smoke-boot passed).
       # ----------------------------------------------------------------------
+      # A tag must never be published without the signing key, or until the
+      # exact cosign binary that will sign it is downloaded, checksum-verified,
+      # and runnable. The upstream installer action has no retry input, so
+      # download the pinned amd64 release directly with curl's retry support.
+      - name: Require signing key
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (matrix.stream == 'stable' || matrix.stream == 'testing')
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "${COSIGN_PRIVATE_KEY:-}" || {
+            echo "::error::SIGNING_SECRET is required before publishing images"
+            exit 1
+          }
+
+      - name: Install cosign
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (matrix.stream == 'stable' || matrix.stream == 'testing')
+        env:
+          COSIGN_VERSION: v2.6.0
+          COSIGN_SHA256: ea5c65f99425d6cfbb5c4b5de5dac035f14d09131c1a0ea7c7fc32eab39364f9
+        run: |
+          set -euo pipefail
+          COSIGN_BIN="$RUNNER_TEMP/cosign-linux-amd64"
+          curl --fail --location --retry 5 --retry-delay 2 --retry-all-errors \
+            --connect-timeout 15 --max-time 120 \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64" \
+            --output "$COSIGN_BIN"
+          echo "${COSIGN_SHA256}  ${COSIGN_BIN}" | sha256sum --check --strict
+          install -D -m 0755 "$COSIGN_BIN" "$HOME/.local/bin/cosign"
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          cosign version
+
       # ghcr.io login + lowercase registry are inlined as shell to avoid
       # third-party JavaScript actions (redhat-actions/podman-login@v1 and
       # ASzc/change-string-case-action@v6 were the last two pinned to Node.js
@@ -1173,10 +1206,6 @@ jobs:
           echo "image_ref=${REG}/${NAME}@${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "Will sign: ${REG}/${NAME}@${DIGEST}"
 
-      - name: Install cosign
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (matrix.stream == 'stable' || matrix.stream == 'testing')
-        uses: sigstore/cosign-installer@v3.10.0
-
       - name: Sign image
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && (matrix.stream == 'stable' || matrix.stream == 'testing')
         env:
@@ -1185,9 +1214,5 @@ jobs:
           IMAGE_REF: ${{ steps.push.outputs.image_ref }}
         run: |
           set -euo pipefail
-          if [ -z "${COSIGN_PRIVATE_KEY:-}" ]; then
-            echo "WARN: SIGNING_SECRET not set; image pushed unsigned."
-            exit 0
-          fi
           cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${IMAGE_REF}"
           echo "signed ${IMAGE_REF}"
