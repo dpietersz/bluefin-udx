@@ -50,6 +50,34 @@ vs `base-nvidia:44`; triage NVIDIA/Bluefin-only packages (e.g. `supergfxctl`,
 `nvidia-settings`, Xorg-for-NVIDIA bits) against what the P14s actually uses
 (journal + dotfiles, same method as the T580 audit). Output: ADD/DROP table.
 
+**Pre-checked 2026-11-10 against this P14s (must be in the ADD list):**
+- `bolt` — Thunderbolt device authorisation; the P14s uses a Thunderbolt dock
+  (`TBU405Pro`), `bolt.service` is active today. Missing in Vitta.
+- `ydotool` — dotfiles `niri-idle-daemon.sh` starts `ydotoold` and
+  `niri-lock.sh` uses it to reset niri's idle timer after unlock. Missing in
+  Vitta, so this is also a **live bug on the T580** (fix in the shared Vitta
+  module list, not only the NVIDIA one).
+- `zenity` — prompt fallback in dotfiles `niri-fabric-popup`. Missing in Vitta.
+- `switcheroo-control` — running today; hybrid-GPU launch-on-dGPU helper.
+- Not needed (GNOME session pieces, unused): gdm, gnome-shell/-control-center/
+  -tweaks/-system-monitor/-disk-utility, ptyxis, gsconnect, input-remapper
+  (active but no config), rygel, gnome-user-share, malcontent, sysprof,
+  setroubleshoot, ibus-mozc/unikey, zfs (zeditor link already in Vitta).
+- NVIDIA userspace (`nvidia-persistenced`, `nvidia-settings`,
+  `nvidia-driver-common`) comes from `base-nvidia` (driver 620.70.06 vs
+  615.78.08 today — newer branch; verify CUDA/NVENC in Phase 4).
+
+**Windows VM pre-check (2026-11-10): every requirement is already in the
+Vitta image at identical versions** — QEMU 10.2.2 (`pc-q35-10.2`), libvirt
+12.0.0 (qemu/network/storage drivers, `default` network), swtpm 0.10.2
+(`tpm-crb`), OVMF 4M secboot code+vars, virtiofsd (3 shares), SPICE
+(ui/char/audio, usb-redirect, usb-host, qxl, spice-server, usbredir),
+virt-viewer/remote-viewer, dnsmasq/nftables/firewalld, libvirt sockets
+enabled, `vitta-groups` (libvirt group) and `vitta-libvirt-relabel`. The VM's
+disk, NVRAM, TPM state and domain XML live in `/var/lib/libvirt`,
+`/var/lib/swtpm-localca` and `/etc/libvirt`, which a rebase keeps.
+Flatpak apps (41, in `/var/lib/flatpak`) also survive the rebase.
+
 ### Phase 1 — Image builds and smoke-boots in CI (1 day)
 Recipe, matrix leg, kargs.d, smoke gate. Acceptance: CI green, image signed as
 `vitta-nvidia:testing`, gap table applied. No hardware yet.
