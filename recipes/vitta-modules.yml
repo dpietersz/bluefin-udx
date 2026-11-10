@@ -49,6 +49,11 @@ modules:
       - gvfs-mtp
       - tuned
       - tuned-ppd                   # power-profiles D-Bus API used by the shell
+      # Re-homed after the P14s pre-check (2026-11-10): Bluefin shipped these.
+      - bolt                        # Thunderbolt device authorisation (docks); D-Bus activated
+      - ydotool                     # dotfiles niri-lock.sh resets niri idle via ydotoold; /dev/uinput uaccess from solaar-udev
+      - zenity                      # prompt fallback in dotfiles niri-fabric-popup
+      - switcheroo-control          # hybrid-GPU "launch on discrete GPU" helper (P14s RTX)
       # Already in base-main:44; listed so the font contract (fontconfig canary
       # "Noto Serif", emoji) does not silently depend on base-main's choice.
       - google-noto-sans-vf-fonts

@@ -120,7 +120,8 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
                  google-noto-sans-vf-fonts google-noto-serif-vf-fonts google-noto-color-emoji-fonts \
                  gvfs gvfs-gphoto2 gvfs-mtp libvirt-client libvirt-daemon-kvm make nautilus podman-compose \
                  qemu-kvm swtpm tailscale tuned tuned-ppd virt-install virt-manager virt-viewer virtiofsd \
-                 xdg-desktop-portal-gnome xdg-user-dirs kmod-v4l2loopback; do check_rpm "$p"; done
+                 xdg-desktop-portal-gnome xdg-user-dirs kmod-v4l2loopback bolt ydotool zenity switcheroo-control; do check_rpm "$p"; done
+        for b in boltctl ydotool ydotoold zenity switcherooctl; do check_bin "$b"; done
         # x86 KVM only: base-main ships qemu-user-static-aarch64 (removed in
         # vitta-modules.yml) and qemu-kvm must not drag in foreign emulators.
         VITTA_QEMU_FOREIGN=$(rpm -qa --qf "%{NAME}\n" | grep -E "^qemu-(user-static|system-)" | grep -Evx "qemu-system-x86(-core)?" || true)
