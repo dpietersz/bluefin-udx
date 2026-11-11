@@ -80,6 +80,7 @@ END {
   echo "[vitta-plymouth] unable to set DeviceScale=1 in ${DEFAULTS}" >&2
   exit 1
 fi
+chmod --reference="${DEFAULTS}" "${DEVICE_SCALE_TMP}"
 mv "${DEVICE_SCALE_TMP}" "${DEFAULTS}"
 trap - EXIT
 sed -i 's/^Theme=.*/Theme=vitta/' "${DEFAULTS}"

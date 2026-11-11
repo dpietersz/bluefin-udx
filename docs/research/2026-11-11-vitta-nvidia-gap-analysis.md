@@ -34,7 +34,7 @@ supplies it (directly or through the designated existing Vitta package);
 
 | item | kind (rpm/file/unit/karg) | in bluefin-dx-nvidia-open | in base-nvidia:44 | used on P14s (evidence) | ADD / DROP / HAVE | where | evidence command |
 |---|---|---|---|---|---|---|---|
-| `00-nvidia.toml`: `rd.driver.blacklist=nouveau`, `modprobe.blacklist=nouveau`, `nvidia-drm.modeset=1`, `initcall_blacklist=simpledrm_platform_driver_init` (in that order) | karg | Present, unowned `/usr/lib/bootc/kargs.d/00-nvidia.toml` | Absent; `/usr/lib/bootc/kargs.d` empty | All four are in the live P14s `/proc/cmdline`; Intel `i915` and NVIDIA `nvidia` bind the two GPUs | **ADD** | `files/vitta-nvidia/usr/lib/bootc/kargs.d/00-nvidia.toml` | `podman run --rm --entrypoint /bin/bash ghcr.io/ublue-os/bluefin-dx-nvidia-open:stable -c 'cat /usr/lib/bootc/kargs.d/00-nvidia.toml'`; `podman run --rm --entrypoint /bin/bash ghcr.io/ublue-os/base-nvidia:44 -c 'find /usr/lib/bootc/kargs.d -type f -print'`; `cat /proc/cmdline`; `lspci -nnk` |
+| `00-nvidia.toml`: `rd.driver.blacklist=nouveau`, `modprobe.blacklist=nouveau`, `nvidia-drm.modeset=1`, `initcall_blacklist=simpledrm_platform_driver_init` (in that order) | karg | Present, unowned `/usr/lib/bootc/kargs.d/00-nvidia.toml` | Absent; `/usr/lib/bootc/kargs.d` empty | All four are in the live P14s `/proc/cmdline`; Intel `i915` and NVIDIA `nvidia` bind the two GPUs | **ADD** | `files/vitta-nvidia/usr/lib/bootc/kargs.d/10-vitta-nvidia.toml` | `podman run --rm --entrypoint /bin/bash ghcr.io/ublue-os/bluefin-dx-nvidia-open:stable -c 'cat /usr/lib/bootc/kargs.d/00-nvidia.toml'`; `podman run --rm --entrypoint /bin/bash ghcr.io/ublue-os/base-nvidia:44 -c 'find /usr/lib/bootc/kargs.d -type f -print'`; `cat /proc/cmdline`; `lspci -nnk` |
 | `fprintd` | rpm | `fprintd-1.94.5-5.fc44.x86_64` | Absent | P14s has the package and the dotfiles fingerprint template detects its `06cb:00f9` sensor; current Vitta lacks the package | **ADD** | shared `recipes/vitta-modules.yml` (Task 6) | `podman run --rm --entrypoint rpm ghcr.io/dpietersz/vitta:stable -q fprintd`; `rpm -q fprintd`; `git -C ~/dotfiles grep -n '06cb:00f9' main -- .chezmoi.toml.tmpl` |
 | `fprintd-pam` | rpm | `fprintd-pam-1.94.5-5.fc44.x86_64` | Absent | P14s has it; dotfiles' fingerprint PAM script explicitly requires it; current Vitta lacks it | **ADD** | shared `recipes/vitta-modules.yml` (Task 6) | `podman run --rm --entrypoint rpm ghcr.io/dpietersz/vitta:stable -q fprintd-pam`; `rpm -q fprintd-pam`; `git -C ~/dotfiles grep -n 'fprintd-pam' main -- .chezmoiscripts/run_once_after_10-enable-fingerprint-pam.sh.tmpl` |
 | `/usr/lib/udev/rules.d/70-libfprint-2.rules` | file | Present; owned by `libfprint` | Absent | It creates the P14s ELAN SPI fingerprint-device binding. `fprintd` requires `libfprint-2.so.2`, so the existing `fprintd` ADD brings this rule transitively. | **ADD** (covered by existing `fprintd` ADD) | shared `recipes/vitta-modules.yml` (Task 6) | `podman run --rm --entrypoint /bin/bash ghcr.io/ublue-os/bluefin-dx-nvidia-open:stable -c 'rpm -q --requires fprintd; rpm -qf /usr/lib/udev/rules.d/70-libfprint-2.rules'` |
@@ -223,7 +223,7 @@ already-recorded disposition in the [2026-11-06 gap analysis](2026-11-06-vitta-g
 | `/etc/profile.d/vte.csh` | exact | **HAVE** — equivalent Vitta profile exists. |
 | `/etc/profile.d/vte.sh` | exact | **HAVE** — equivalent Vitta profile exists. |
 | `/etc/environment` | different | **DROP** — Bluefin session environment delta, not NVIDIA/hybrid integration. |
-| `/usr/lib/bootc/kargs.d/00-nvidia.toml` | absent | **ADD** — required P14s NVIDIA arguments; `files/vitta-nvidia/usr/lib/bootc/kargs.d/00-nvidia.toml`. |
+| `/usr/lib/bootc/kargs.d/00-nvidia.toml` | absent | **ADD** — required P14s NVIDIA arguments; `files/vitta-nvidia/usr/lib/bootc/kargs.d/10-vitta-nvidia.toml`. |
 | `/usr/lib/dracut/dracut.conf.d/80-vfio.conf` | absent | **DROP** — no PCI hostdev in `windows-work`; covered by the VFIO row above. |
 | `/usr/lib/dracut/dracut.conf.d/90-passkeys-tpm.conf` | absent | **DROP** — no active P14s/dotfiles evidence. |
 | `/usr/lib/modprobe.d/98-v4l2loopback.conf` | exact | **HAVE** — existing shared Vitta virtual-camera configuration. |
@@ -388,7 +388,7 @@ remains empty.
 
 | item | destination |
 |---|---|
-| `00-nvidia.toml` with the four kernel args above, in order | `files/vitta-nvidia/usr/lib/bootc/kargs.d/00-nvidia.toml` |
+| `00-nvidia.toml` with the four kernel args above, in order | `files/vitta-nvidia/usr/lib/bootc/kargs.d/10-vitta-nvidia.toml` |
 | `fprintd` | shared `recipes/vitta-modules.yml` (Task 6) |
 | `fprintd-pam` | shared `recipes/vitta-modules.yml` (Task 6) |
 | `nvtop` | `recipes/vitta-nvidia.yml` |

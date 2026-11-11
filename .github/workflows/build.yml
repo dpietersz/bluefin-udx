@@ -624,10 +624,34 @@ jobs:
                 if [ -x /usr/libexec/vitta/vitta-greeter ]; then echo "  ok    /usr/libexec/vitta/vitta-greeter executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greeter missing or not executable"; FAIL=1; fi
                 if [ -x /usr/libexec/vitta/vitta-greeter-gpu ]; then echo "  ok    /usr/libexec/vitta/vitta-greeter-gpu executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greeter-gpu missing or not executable"; FAIL=1; fi
                 if grep -Fq "WLR_DRM_DEVICES" /usr/libexec/vitta/vitta-greeter; then echo "  ok    vitta-greeter accepts the panel GPU hint"; else echo "  FAIL  vitta-greeter does not accept the panel GPU hint"; FAIL=1; fi
-                if VITTA_GREETER_GPU=$(/usr/libexec/vitta/vitta-greeter-gpu); then
-                    if [ -z "$VITTA_GREETER_GPU" ]; then echo "  ok    vitta-greeter-gpu leaves the smoke container unpinned"; else echo "  FAIL  vitta-greeter-gpu unexpectedly selected: $VITTA_GREETER_GPU"; FAIL=1; fi
+                VITTA_GREETER_GPU=""
+                VITTA_GREETER_GPU_RC=0
+                if VITTA_GREETER_GPU=$(VITTA_SYSFS_ROOT=/nonexistent /usr/libexec/vitta/vitta-greeter-gpu); then
+                    VITTA_GREETER_GPU_RC=0
                 else
-                    echo "  FAIL  vitta-greeter-gpu did not exit zero"; FAIL=1
+                    VITTA_GREETER_GPU_RC=$?
+                fi
+                if [ "$VITTA_GREETER_GPU_RC" -eq 0 ] && [ -z "$VITTA_GREETER_GPU" ]; then
+                    echo "  ok    vitta-greeter-gpu leaves missing sysfs unpinned"
+                else
+                    echo "  FAIL  vitta-greeter-gpu missing sysfs output=${VITTA_GREETER_GPU:-empty} exit=$VITTA_GREETER_GPU_RC"; FAIL=1
+                fi
+                VITTA_GREETER_SYSFS=/tmp/vitta-greeter-gpu-sysfs
+                rm -rf "$VITTA_GREETER_SYSFS"
+                mkdir -p "$VITTA_GREETER_SYSFS/class/drm/card0/device" "$VITTA_GREETER_SYSFS/class/drm/card0-eDP-1" "$VITTA_GREETER_SYSFS/class/drm/card1"
+                printf "1\n" > "$VITTA_GREETER_SYSFS/class/drm/card0/device/boot_vga"
+                printf "connected\n" > "$VITTA_GREETER_SYSFS/class/drm/card0-eDP-1/status"
+                VITTA_GREETER_GPU=""
+                VITTA_GREETER_GPU_RC=0
+                if VITTA_GREETER_GPU=$(VITTA_SYSFS_ROOT="$VITTA_GREETER_SYSFS" /usr/libexec/vitta/vitta-greeter-gpu); then
+                    VITTA_GREETER_GPU_RC=0
+                else
+                    VITTA_GREETER_GPU_RC=$?
+                fi
+                if [ "$VITTA_GREETER_GPU_RC" -eq 0 ] && [ "$VITTA_GREETER_GPU" = /dev/dri/card0 ]; then
+                    echo "  ok    vitta-greeter-gpu selects fake panel GPU"
+                else
+                    echo "  FAIL  vitta-greeter-gpu fake sysfs output=${VITTA_GREETER_GPU:-empty} exit=$VITTA_GREETER_GPU_RC, expected /dev/dri/card0"; FAIL=1
                 fi
                 if [ -x /usr/libexec/vitta/vitta-greeter-idle ] && [ -s /usr/share/vitta/greeter/IdleOverlay.qml ] && grep -Fq "timeout 300 \"\$0 --blank\"" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "timeout 900 \"\$0 --suspend\"" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "VITTA_GREETER_PREVIEW" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "systemctl suspend" /usr/libexec/vitta/vitta-greeter-idle; then
                     echo "  ok    greeter idle: 5 min black overlay, 15 min battery suspend, preview guarded"

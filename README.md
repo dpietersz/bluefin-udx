@@ -108,6 +108,8 @@ The NVIDIA Vitta testing image targets the ThinkPad P14s Gen 5, but that laptop 
 sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/dpietersz/vitta-nvidia:testing
 ```
 
+Do **not** switch the P14s until the vitta-nvidia acceptance runbook, [`docs/how-to/vitta-p14s-acceptance.md`](docs/how-to/vitta-p14s-acceptance.md) (next PR), lands and the owner decides to proceed. Before the first anonymous pull can work, the GHCR `vitta-nvidia` package may also need to be set public.
+
 The full acceptance and recovery checklist is [`docs/how-to/vitta-t580-acceptance.md`](docs/how-to/vitta-t580-acceptance.md). To return to the previous deployment:
 
 ```bash
