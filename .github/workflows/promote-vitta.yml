@@ -32,16 +32,26 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Require explicit confirmation
+      - name: Require explicit confirmation and supported image name
+        id: input
         env:
           CONFIRM: ${{ inputs.confirm }}
           IMAGE_NAME: ${{ inputs.image }}
         run: |
           set -euo pipefail
+          case "$IMAGE_NAME" in
+            vitta|vitta-nvidia)
+              ;;
+            *)
+              echo "::error::image must be vitta or vitta-nvidia"
+              exit 1
+              ;;
+          esac
           if [[ "$CONFIRM" != "promote" ]]; then
             echo "::error::Type promote in the confirm input to retag ${IMAGE_NAME} as stable"
             exit 1
           fi
+          echo "image_name=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -79,7 +89,7 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
-          IMAGE_NAME: ${{ inputs.image }}
+          IMAGE_NAME: ${{ steps.input.outputs.image_name }}
         run: |
           set -euo pipefail
           IMAGE_REGISTRY="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${IMAGE_NAME}"
