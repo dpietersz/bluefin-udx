@@ -1,10 +1,15 @@
 #!/bin/bash
 # Compare the packages and selected non-RPM integration files supplied by
-# bluefin-dx-nvidia-open with the desktop-less base-main image.
+# bluefin-dx-nvidia-open with the desktop-less base-main image. BLUEFIN_IMAGE
+# and BASE_IMAGE are overridable so the same comparison can target an NVIDIA
+# base without changing the script's Intel-Vitta defaults.
 #
 # Usage:
 #   scripts/vitta-gap-report.sh
 #   OUTPUT_DIR=/tmp/vitta-gap ENGINE=podman scripts/vitta-gap-report.sh
+#   BLUEFIN_IMAGE=ghcr.io/ublue-os/bluefin-dx-nvidia-open:stable \
+#     BASE_IMAGE=ghcr.io/ublue-os/base-nvidia:44 OUTPUT_DIR=/tmp/vitta-nvidia-gap \
+#     scripts/vitta-gap-report.sh
 #
 # Writes sorted lists to OUTPUT_DIR and prints the Bluefin-only package and
 # integration-file differences. The report is intentionally NVIDIA-source based:
