@@ -1,6 +1,9 @@
 """Static regression checks for the Vitta NVIDIA recipe and its private overlay."""
 
+import os
 from pathlib import Path
+import re
+import subprocess
 import tomllib
 import unittest
 
@@ -128,6 +131,41 @@ class VittaNvidiaCiTests(unittest.TestCase):
         self.assertIn('IMAGE_REGISTRY="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${IMAGE_NAME}"', workflow)
         self.assertNotIn("IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}", workflow)
         self.assertNotIn("ghcr.io/${{ github.repository_owner }}/vitta\n", workflow)
+
+    def test_promotion_rejects_unsupported_image_names(self):
+        workflow = self.PROMOTION_WORKFLOW.read_text()
+        run_scripts = re.findall(r"(?ms)^        run: \|\n(.*?)(?=^      - |\Z)", workflow)
+        for script in run_scripts:
+            with self.subTest(script=script):
+                self.assertNotIn("inputs.image", script)
+
+        validation = re.search(
+            r'(?ms)^          case "\$IMAGE_NAME" in\n.*?^          esac$',
+            workflow,
+        )
+        self.assertIsNotNone(validation, "promotion workflow must validate IMAGE_NAME")
+        snippet = validation.group(0)
+        for image_name in ("vitta", "vitta-nvidia"):
+            with self.subTest(image_name=image_name):
+                result = subprocess.run(
+                    ["bash", "-c", snippet],
+                    env=os.environ | {"IMAGE_NAME": image_name},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+        for image_name in ("vitta-evil", "bluefin-udx", "", "vitta/../x"):
+            with self.subTest(image_name=image_name):
+                result = subprocess.run(
+                    ["bash", "-c", snippet],
+                    env=os.environ | {"IMAGE_NAME": image_name},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("::error::", result.stdout)
 
 
 if __name__ == "__main__":
