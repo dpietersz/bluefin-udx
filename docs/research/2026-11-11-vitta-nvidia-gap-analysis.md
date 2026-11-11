@@ -58,75 +58,142 @@ is not a Bluefin delta.
 The earlier filename-only environment/SELinux check was insufficient. I
 re-ran a content comparison for every requested category. The commands below
 are the exact read-only capture: `scan_image` invokes **one** `podman run` for
-each image, writes the `find -printf "%p %s\n"` inventory and per-file SHA-256
-manifest under `/tmp`, then compares the two captured manifests. The third
-local-image capture is solely the required current-Vitta equivalence check; no
-image was pulled.
+each image, inventories every selected regular file or symlink (including its
+`%l` link target), and records a SHA-256 manifest under `/tmp`. Regular files
+are hashed by content; symlinks are hashed by their recorded link target. The
+third local-image capture is solely the required current-Vitta equivalence
+check; no image was pulled.
 
 ```bash
 set -euo pipefail
 export LC_ALL=C
-work=/tmp/vitta-nvidia-integration-comparison
+work=/tmp/vitta-nvidia-integration-comparison-r2
 rm -rf "$work" && mkdir -p "$work"
 cat > "$work/container-scan.sh" <<'CONTAINER'
 set -euo pipefail
-sizes=/tmp/category-file-sizes
+entries=/tmp/category-file-entries
+unit_name_target_pattern='nvidia|nvctk|supergfx|switcheroo|prime|gpu|fprint|bolt|thunderbolt|libvirt|virt|tuned|power-profiles'
+unit_content_pattern='nvidia|nvctk|supergfx|switcheroo|prime|gpu|fprint|bolt|thunderbolt|power-profiles'
+selinux_pattern='nvidia|container|xdm|greetd|fprint'
+shopt -s nocasematch
+emit_path() {
+  local path=$1 type=$2 size=$3 link_target=$4
+  printf '%s\t%s\t%s\t%s\n' "$path" "$type" "$size" "$link_target"
+}
+emit_dir() {
+  local dir=$1
+  [ -d "$dir" ] || return 0
+  find "$dir" \( -type f -o -type l \) -printf '%p\t%y\t%s\t%l\n'
+}
+emit_selected_units() {
+  local dir=$1 path type size link_target name
+  [ -d "$dir" ] || return 0
+  while IFS=$'\t' read -r -d '' path type size link_target; do
+    name=${path##*/}
+    if [[ $name =~ $unit_name_target_pattern || $link_target =~ $unit_name_target_pattern ]] ||
+      { [[ $type == f ]] && grep -IqiE "$unit_content_pattern" "$path"; }; then
+      emit_path "$path" "$type" "$size" "$link_target"
+    fi
+  done < <(find "$dir" \( -type f -o -type l \) -printf '%p\t%y\t%s\t%l\0')
+}
+emit_selinux_modules() {
+  local store=$1 priority_dir module type size link_target name
+  [ -d "$store" ] || return 0
+  for priority_dir in "$store"/*/; do
+    [ -d "$priority_dir" ] || continue
+    for module in "$priority_dir"*; do
+      [ -e "$module" ] || [ -L "$module" ] || continue
+      name=${module##*/}
+      if [[ $name =~ $selinux_pattern ]]; then
+        type=$(stat -c '%F' "$module")
+        case $type in
+          'regular file') type=f ;;
+          'symbolic link') type=l ;;
+          *) continue ;;
+        esac
+        size=$(stat -c '%s' "$module")
+        link_target=$(readlink "$module" 2>/dev/null || true)
+        emit_path "$module" "$type" "$size" "$link_target"
+      fi
+    done
+  done
+}
 {
   for d in \
     /usr/lib/bootc/kargs.d \
-    /usr/lib/dracut/dracut.conf.d \
+    /usr/lib/dracut/dracut.conf.d /etc/dracut.conf.d \
     /usr/lib/modprobe.d /etc/modprobe.d \
     /usr/lib/modules-load.d /etc/modules-load.d \
     /usr/lib/udev/rules.d /etc/udev/rules.d \
     /usr/lib/environment.d /etc/environment.d /etc/profile.d \
     /usr/lib/systemd/system-preset /usr/lib/systemd/user-preset \
+    /etc/systemd/system-preset /etc/systemd/user-preset \
     /usr/share/X11/xorg.conf.d /etc/X11/xorg.conf.d \
     /etc/nvidia-container-runtime /etc/cdi; do
-    [ -d "$d" ] && find "$d" -type f -printf '%p %s\n'
+    emit_dir "$d"
   done
-  [ -f /etc/environment ] && find /etc/environment -type f -printf '%p %s\n'
+  [ -f /etc/environment ] && emit_path /etc/environment f "$(stat -c '%s' /etc/environment)" ''
   for d in /usr/share/glvnd /usr/share/vulkan /etc/vulkan; do
-    [ -d "$d" ] && find "$d" -type f -name '*.json' -printf '%p %s\n'
+    [ -d "$d" ] && find "$d" \( -type f -o -type l \) -name '*.json' -printf '%p\t%y\t%s\t%l\n'
   done
-  [ -d /usr/share/selinux ] && find /usr/share/selinux -type f -iname '*nvidia*' -printf '%p %s\n'
-  for d in /usr/lib/systemd/system /usr/lib/systemd/user; do
-    [ -d "$d" ] || continue
-    while IFS= read -r -d '' f; do
-      name=${f##*/}
-      if [[ $name =~ (nvidia|nvctk|supergfx|switcheroo|prime|gpu|fprint|bolt|thunderbolt) ]] || grep -IqiE 'nvidia|nvctk|supergfx|switcheroo|prime|gpu|fprint|bolt|thunderbolt' "$f"; then
-        find "$f" -type f -printf '%p %s\n'
-      fi
-    done < <(find "$d" -type f -print0)
-  done
-} | sort -u > "$sizes"
-printf '%s\n' '--- SIZES ---'; cat "$sizes"
-printf '%s\n' '--- SHA256 ---'
-while IFS=' ' read -r path size; do sha256sum "$path"; done < "$sizes" | sort -k2,2
+  [ -d /usr/share/selinux ] && find /usr/share/selinux \( -type f -o -type l \) -iname '*nvidia*' -printf '%p\t%y\t%s\t%l\n'
+  emit_selinux_modules /etc/selinux/targeted/active/modules
+  emit_selinux_modules /var/lib/selinux/targeted/active/modules
+  emit_selected_units /usr/lib/systemd/system
+  emit_selected_units /usr/lib/systemd/user
+  emit_dir /etc/systemd/system
+  emit_dir /etc/systemd/user
+} | sort -u > "$entries"
+printf '%s\n' '--- ENTRIES ---'; cat "$entries"
+printf '%s\n' '--- SELINUX MODULES ---'
+for store in /etc/selinux/targeted/active/modules /var/lib/selinux/targeted/active/modules; do
+  [ -d "$store" ] || continue
+  ls -1 "$store"/*/ 2>/dev/null | grep -Ei "$selinux_pattern" || true
+done | sort -u
+printf '%s\n' '--- MANIFEST ---'
+while IFS=$'\t' read -r path type size link_target; do
+  if [[ $type == f ]]; then
+    fingerprint=$(sha256sum "$path" | awk '{print $1}')
+  else
+    fingerprint=$(printf '%s' "$link_target" | sha256sum | awk '{print $1}')
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$path" "$type" "$size" "$link_target" "$fingerprint"
+done < "$entries" | sort -t $'\t' -k1,1
 CONTAINER
 scan_image() {
   local label=$1 image=$2
   podman run --rm --entrypoint /bin/bash "$image" -c "$(< "$work/container-scan.sh")" > "$work/$label.manifest"
-  awk '/^--- SIZES ---/{s="sizes";next} /^--- SHA256 ---/{s="sha";next} s=="sizes"{print}' "$work/$label.manifest" > "$work/$label.sizes"
-  awk '/^--- SHA256 ---/{s=1;next} s{print}' "$work/$label.manifest" > "$work/$label.sha256"
-  awk '{print $1}' "$work/$label.sizes" > "$work/$label.paths"
-  awk '{print $2 " " $1}' "$work/$label.sha256" > "$work/$label.path-sha"
+  awk '/^--- ENTRIES ---/{s="entries";next} /^--- SELINUX MODULES ---/{s="selinux";next} /^--- MANIFEST ---/{s="manifest";next} s=="entries"{print}' "$work/$label.manifest" > "$work/$label.entries"
+  awk '/^--- SELINUX MODULES ---/{s=1;next} /^--- MANIFEST ---/{s=0} s{print}' "$work/$label.manifest" > "$work/$label.selinux-modules"
+  awk '/^--- MANIFEST ---/{s=1;next} s{print}' "$work/$label.manifest" > "$work/$label.full-manifest"
+  cut -f1 "$work/$label.entries" > "$work/$label.paths"
+  awk -F $'\t' '{print $1 "\t" $2 ":" $5}' "$work/$label.full-manifest" > "$work/$label.path-fingerprint"
 }
 scan_image bluefin ghcr.io/ublue-os/bluefin-dx-nvidia-open:stable
 scan_image base ghcr.io/ublue-os/base-nvidia:44
 scan_image vitta ghcr.io/dpietersz/vitta:stable
 comm -23 "$work/bluefin.paths" "$work/base.paths" > "$work/bluefin-only.paths"
-join -j 1 "$work/bluefin.path-sha" "$work/base.path-sha" |
-  awk '$2 != $3 {print $1 "\tbluefin=" $2 "\tbase=" $3}' > "$work/differing.paths"
+join -t $'\t' -j 1 "$work/bluefin.path-fingerprint" "$work/base.path-fingerprint" |
+  awk -F $'\t' '$2 != $3 {print $1 "\tbluefin=" $2 "\tbase=" $3}' > "$work/differing.paths"
+comm -3 "$work/bluefin.selinux-modules" "$work/base.selinux-modules" > "$work/selinux-module-differences"
+printf 'candidate files: bluefin=%s base=%s vitta=%s\n' "$(wc -l < "$work/bluefin.entries")" "$(wc -l < "$work/base.entries")" "$(wc -l < "$work/vitta.entries")"
+printf 'bluefin-only=%s differing=%s selinux-module-differences=%s\n' "$(wc -l < "$work/bluefin-only.paths")" "$(wc -l < "$work/differing.paths")" "$(wc -l < "$work/selinux-module-differences")"
 ```
 
-The capture contains 341 Bluefin, 296 base-NVIDIA, and 287 current-Vitta
-candidate files. It found **89 Bluefin-only** paths and **12 same-path content
-differences** (101 dispositions below). Against current Vitta, 18 are
-byte-identical, 13 differ, and 70 are absent. Thus all requested
-`kargs.d`, dracut, modprobe, modules-load, udev, environment/profile,
-preset, selected system/user-unit, Xorg, GLVND/Vulkan, CDI, and NVIDIA SELinux
-locations were considered. The scan found no candidate files in the requested
-Xorg, GLVND/Vulkan JSON, NVIDIA-container/CDI, or NVIDIA-SELinux categories.
+The capture contains 596 Bluefin, 406 base-NVIDIA, and 495 current-Vitta
+candidate files. It found **239 Bluefin-only** paths and **12 same-path content
+differences** (251 differential paths, grouped into dispositions below). Against current Vitta, 110 are
+byte-identical, 14 differ, and 127 are absent. The selected `/usr/lib/systemd`
+scan contains regular files and symlinks; the `/etc/systemd/{system,user}`
+scan is recursive and exhaustive, so it includes unit enablement symlinks and
+drop-ins. Thus all requested `kargs.d`, both `/usr/lib` and `/etc` dracut,
+modprobe, modules-load, udev, environment/profile, both `/usr/lib` and `/etc`
+preset, selected `/usr/lib/systemd` system/user unit, complete `/etc/systemd`
+system/user unit, Xorg, GLVND/Vulkan, CDI, `/usr/share/selinux`, and active
+SELinux-policy-store locations were considered. The scan found no entries in
+`/etc/dracut.conf.d`, `/etc/systemd/{system,user}-preset`, Xorg,
+GLVND/Vulkan JSON, or NVIDIA-container/CDI; the policy-store module-list
+comparison had zero Bluefin/base differences.
 
 `exact` below means byte-identical to current `vitta:stable`; `different` means
 Vitta has the path but different content. Every `DROP` follows the task rule:
@@ -237,6 +304,79 @@ already-recorded disposition in the [2026-11-06 gap analysis](2026-11-06-vitta-g
 | `/usr/lib/udev/rules.d/99-input-remapper.rules` | absent | **DROP** — input-remapper is unused. |
 | `/usr/lib/udev/rules.d/99-qat-vfio.rules` | exact | **HAVE** — existing Vitta VM stack supplies the identical Intel QAT/VFIO rule. |
 | `/usr/lib/udev/rules.d/99-z-dm-mpath-late.rules` | absent | **DROP** — multipath is unused. |
+| `/etc/dracut.conf.d`, `/etc/systemd/system-preset`, and `/etc/systemd/user-preset` | no regular files or symlinks in any capture | **HAVE** — each requested `/etc` location was scanned; there is no Bluefin delta to carry forward. |
+| Active SELinux policy stores: `container`, `fprintd`, `nvidia-container`, `nvidia-driver` | Bluefin and base-NVIDIA lists are identical; current Vitta has `container`, `fprintd`, `greetd` | **HAVE** — no Bluefin-only policy module; the NVIDIA modules come from `base-nvidia`. |
+| Selected core KVM unit files: `libvirtd*`, `virtqemud*`, `virtinterfaced*`, `virtlockd*`, `virtlogd*`, `virtnetworkd*`, `virtnodedevd*`, `virtnwfilterd*`, `virtproxyd*`, `virtsecretd*`, `virtstoraged*`, and `virt-guest-shutdown.target` | exact | **HAVE** — supplied by Vitta's existing `libvirt-daemon-kvm` stack; this is the selected KVM set from the 2026-11-06 analysis. |
+| `libvirt-workaround.service` and its `multi-user.target.wants` enablement | absent | **HAVE** — active/enabled on the P14s, but Vitta already replaces it with `files/vitta/usr/lib/systemd/system/vitta-libvirt-relabel.service`, enabled in `recipes/vitta-modules.yml`; it performs the same SELinux relabeling. |
+| `libvirt-dbus.service` (system and user) and `virtchd*` | absent | **DROP** — not in the selected P14s KVM service set and has no active-P14s/dotfiles evidence. |
+| `virtlxcd*`, `virtvboxd*`, and `virtxend*` unit files and enablement symlinks | absent | **DROP** — LXC, VirtualBox, and Xen are explicitly outside the selected KVM set; their P14s services are inactive. |
+| `/etc/systemd/system/graphical.target.wants/switcheroo-control.service` -> `/usr/lib/systemd/system/switcheroo-control.service` | exact | **HAVE** — enabled and active on the P14s; Vitta has the identical enablement symlink. |
+| `/etc/systemd/system/graphical.target.wants/tuned-ppd.service` and `/etc/systemd/system/multi-user.target.wants/tuned.service` | exact | **HAVE** — both are enabled and active on the P14s; Vitta has the identical enablement symlinks. |
+| 29 KVM `/etc/systemd/system` enablement symlinks listed below | exact | **HAVE** — every target is enabled and active on the P14s and every link is byte-identical in current Vitta. |
+| The 10 exact remaining `/etc/systemd` entries: Brew (two), Tailscale, Docker, iSCSI (four), BlueZ, and XDG user dirs | exact | **HAVE** — current Vitta retains their byte-identical enablement. |
+| `/etc/systemd/system/display-manager.service` | different | **HAVE** — Vitta correctly selects greetd rather than Bluefin's display manager. |
+| `/etc/systemd/system/default.target.wants/bluefin-dx-groups.service` | absent | **HAVE** — Vitta intentionally replaces it with `vitta-groups.service`. |
+| The remaining 24 absent Bluefin-only `/etc/systemd` entries: input-remapper, Flatpak, dconf, sensors/sysstat, ublue setup, ZFS/multipath, Podman socket/auto-update, uupd, and Zed | absent | **DROP** — 2026-11-06 baseline triage found no P14s/dotfiles need. |
+
+The 45 Bluefin-only `/etc/systemd` enablement symlinks whose name or target
+matches the required terms were captured with their targets. There were no
+matching regular-file drop-ins. The P14s check for every target was:
+
+```bash
+while IFS=$'\t' read -r path type size target; do
+  unit=${target##*/}
+  systemctl is-enabled "$unit"
+  systemctl is-active "$unit"
+done < "$work/relevant-enablements.tsv"
+```
+
+```text
+/etc/systemd/system/graphical.target.wants/switcheroo-control.service -> /usr/lib/systemd/system/switcheroo-control.service
+/etc/systemd/system/graphical.target.wants/tuned-ppd.service -> /usr/lib/systemd/system/tuned-ppd.service
+/etc/systemd/system/multi-user.target.wants/libvirt-workaround.service -> /usr/lib/systemd/system/libvirt-workaround.service
+/etc/systemd/system/multi-user.target.wants/tuned.service -> /usr/lib/systemd/system/tuned.service
+/etc/systemd/system/multi-user.target.wants/virtlxcd.service -> /usr/lib/systemd/system/virtlxcd.service
+/etc/systemd/system/multi-user.target.wants/virtqemud.service -> /usr/lib/systemd/system/virtqemud.service
+/etc/systemd/system/multi-user.target.wants/virtvboxd.service -> /usr/lib/systemd/system/virtvboxd.service
+/etc/systemd/system/multi-user.target.wants/virtxend.service -> /usr/lib/systemd/system/virtxend.service
+/etc/systemd/system/sockets.target.wants/virtinterfaced-admin.socket -> /usr/lib/systemd/system/virtinterfaced-admin.socket
+/etc/systemd/system/sockets.target.wants/virtinterfaced-ro.socket -> /usr/lib/systemd/system/virtinterfaced-ro.socket
+/etc/systemd/system/sockets.target.wants/virtinterfaced.socket -> /usr/lib/systemd/system/virtinterfaced.socket
+/etc/systemd/system/sockets.target.wants/virtlockd-admin.socket -> /usr/lib/systemd/system/virtlockd-admin.socket
+/etc/systemd/system/sockets.target.wants/virtlockd.socket -> /usr/lib/systemd/system/virtlockd.socket
+/etc/systemd/system/sockets.target.wants/virtlogd-admin.socket -> /usr/lib/systemd/system/virtlogd-admin.socket
+/etc/systemd/system/sockets.target.wants/virtlogd.socket -> /usr/lib/systemd/system/virtlogd.socket
+/etc/systemd/system/sockets.target.wants/virtlxcd-admin.socket -> /usr/lib/systemd/system/virtlxcd-admin.socket
+/etc/systemd/system/sockets.target.wants/virtlxcd-ro.socket -> /usr/lib/systemd/system/virtlxcd-ro.socket
+/etc/systemd/system/sockets.target.wants/virtlxcd.socket -> /usr/lib/systemd/system/virtlxcd.socket
+/etc/systemd/system/sockets.target.wants/virtnetworkd-admin.socket -> /usr/lib/systemd/system/virtnetworkd-admin.socket
+/etc/systemd/system/sockets.target.wants/virtnetworkd-ro.socket -> /usr/lib/systemd/system/virtnetworkd-ro.socket
+/etc/systemd/system/sockets.target.wants/virtnetworkd.socket -> /usr/lib/systemd/system/virtnetworkd.socket
+/etc/systemd/system/sockets.target.wants/virtnodedevd-admin.socket -> /usr/lib/systemd/system/virtnodedevd-admin.socket
+/etc/systemd/system/sockets.target.wants/virtnodedevd-ro.socket -> /usr/lib/systemd/system/virtnodedevd-ro.socket
+/etc/systemd/system/sockets.target.wants/virtnodedevd.socket -> /usr/lib/systemd/system/virtnodedevd.socket
+/etc/systemd/system/sockets.target.wants/virtnwfilterd-admin.socket -> /usr/lib/systemd/system/virtnwfilterd-admin.socket
+/etc/systemd/system/sockets.target.wants/virtnwfilterd-ro.socket -> /usr/lib/systemd/system/virtnwfilterd-ro.socket
+/etc/systemd/system/sockets.target.wants/virtnwfilterd.socket -> /usr/lib/systemd/system/virtnwfilterd.socket
+/etc/systemd/system/sockets.target.wants/virtproxyd-admin.socket -> /usr/lib/systemd/system/virtproxyd-admin.socket
+/etc/systemd/system/sockets.target.wants/virtproxyd-ro.socket -> /usr/lib/systemd/system/virtproxyd-ro.socket
+/etc/systemd/system/sockets.target.wants/virtproxyd.socket -> /usr/lib/systemd/system/virtproxyd.socket
+/etc/systemd/system/sockets.target.wants/virtqemud-admin.socket -> /usr/lib/systemd/system/virtqemud-admin.socket
+/etc/systemd/system/sockets.target.wants/virtqemud-ro.socket -> /usr/lib/systemd/system/virtqemud-ro.socket
+/etc/systemd/system/sockets.target.wants/virtqemud.socket -> /usr/lib/systemd/system/virtqemud.socket
+/etc/systemd/system/sockets.target.wants/virtsecretd-admin.socket -> /usr/lib/systemd/system/virtsecretd-admin.socket
+/etc/systemd/system/sockets.target.wants/virtsecretd-ro.socket -> /usr/lib/systemd/system/virtsecretd-ro.socket
+/etc/systemd/system/sockets.target.wants/virtsecretd.socket -> /usr/lib/systemd/system/virtsecretd.socket
+/etc/systemd/system/sockets.target.wants/virtstoraged-admin.socket -> /usr/lib/systemd/system/virtstoraged-admin.socket
+/etc/systemd/system/sockets.target.wants/virtstoraged-ro.socket -> /usr/lib/systemd/system/virtstoraged-ro.socket
+/etc/systemd/system/sockets.target.wants/virtstoraged.socket -> /usr/lib/systemd/system/virtstoraged.socket
+/etc/systemd/system/sockets.target.wants/virtvboxd-admin.socket -> /usr/lib/systemd/system/virtvboxd-admin.socket
+/etc/systemd/system/sockets.target.wants/virtvboxd-ro.socket -> /usr/lib/systemd/system/virtvboxd-ro.socket
+/etc/systemd/system/sockets.target.wants/virtvboxd.socket -> /usr/lib/systemd/system/virtvboxd.socket
+/etc/systemd/system/sockets.target.wants/virtxend-admin.socket -> /usr/lib/systemd/system/virtxend-admin.socket
+/etc/systemd/system/sockets.target.wants/virtxend-ro.socket -> /usr/lib/systemd/system/virtxend-ro.socket
+/etc/systemd/system/sockets.target.wants/virtxend.socket -> /usr/lib/systemd/system/virtxend.socket
+```
 
 This comparison adds no independent NVIDIA/hybrid ADD beyond the existing
 `00-nvidia.toml` row. The two fingerprint paths above are covered by the
