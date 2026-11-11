@@ -622,6 +622,13 @@ jobs:
                 # ostree populates /var only on first deploy; a rebased machine needs tmpfiles.
                 if grep -Eqs "^d[[:space:]]+/var/lib/greetd[[:space:]]" /usr/lib/tmpfiles.d/*.conf; then echo "  ok    /var/lib/greetd created by tmpfiles.d"; else echo "  FAIL  no tmpfiles.d d-line creates /var/lib/greetd"; FAIL=1; fi
                 if [ -x /usr/libexec/vitta/vitta-greeter ]; then echo "  ok    /usr/libexec/vitta/vitta-greeter executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greeter missing or not executable"; FAIL=1; fi
+                if [ -x /usr/libexec/vitta/vitta-greeter-gpu ]; then echo "  ok    /usr/libexec/vitta/vitta-greeter-gpu executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greeter-gpu missing or not executable"; FAIL=1; fi
+                if grep -Fq "WLR_DRM_DEVICES" /usr/libexec/vitta/vitta-greeter; then echo "  ok    vitta-greeter accepts the panel GPU hint"; else echo "  FAIL  vitta-greeter does not accept the panel GPU hint"; FAIL=1; fi
+                if VITTA_GREETER_GPU=$(/usr/libexec/vitta/vitta-greeter-gpu); then
+                    if [ -z "$VITTA_GREETER_GPU" ]; then echo "  ok    vitta-greeter-gpu leaves the smoke container unpinned"; else echo "  FAIL  vitta-greeter-gpu unexpectedly selected: $VITTA_GREETER_GPU"; FAIL=1; fi
+                else
+                    echo "  FAIL  vitta-greeter-gpu did not exit zero"; FAIL=1
+                fi
                 if [ -x /usr/libexec/vitta/vitta-greeter-idle ] && [ -s /usr/share/vitta/greeter/IdleOverlay.qml ] && grep -Fq "timeout 300 \"\$0 --blank\"" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "timeout 900 \"\$0 --suspend\"" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "VITTA_GREETER_PREVIEW" /usr/libexec/vitta/vitta-greeter-idle && grep -Fq "systemctl suspend" /usr/libexec/vitta/vitta-greeter-idle; then
                     echo "  ok    greeter idle: 5 min black overlay, 15 min battery suspend, preview guarded"
                 else

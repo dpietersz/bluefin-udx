@@ -1,0 +1,40 @@
+#!/bin/bash
+# vitta-greeter-gpu — print the DRM card that owns Vitta's panel, if known.
+# Leave wlroots to choose on a single-GPU system or when sysfs gives no hint.
+set -u
+
+DRM_DIR="${VITTA_SYSFS_ROOT:-/sys}/class/drm"
+CARDS=()
+
+for CARD in "$DRM_DIR"/card[0-9]*; do
+    [ -e "$CARD" ] || continue
+    CARD_NAME=${CARD##*/}
+    [[ "$CARD_NAME" =~ ^card[0-9]+$ ]] || continue
+    CARDS+=("$CARD")
+done
+
+if [ "${#CARDS[@]}" -lt 2 ]; then
+    exit 0
+fi
+
+for CARD in "${CARDS[@]}"; do
+    CARD_NAME=${CARD##*/}
+    for CONNECTOR in "$DRM_DIR"/"$CARD_NAME"-eDP-*; do
+        [ -f "$CONNECTOR/status" ] || continue
+        STATUS=$(cat "$CONNECTOR/status" 2>/dev/null || true)
+        if [ "$STATUS" = connected ]; then
+            printf "/dev/dri/%s\n" "$CARD_NAME"
+            exit 0
+        fi
+    done
+done
+
+for CARD in "${CARDS[@]}"; do
+    BOOT_VGA=$(cat "$CARD/device/boot_vga" 2>/dev/null || true)
+    if [ "$BOOT_VGA" = 1 ]; then
+        printf "/dev/dri/%s\n" "${CARD##*/}"
+        exit 0
+    fi
+done
+
+exit 0
