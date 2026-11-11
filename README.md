@@ -11,7 +11,7 @@
 This repository builds [bootc](https://containers.github.io/bootc/) images for my Lenovo ThinkPads:
 
 - **T580** (Intel iGPU only) — `ghcr.io/dpietersz/vitta:stable`; Bluefin UDX remains the rollback image.
-- **P14s Gen5 i7** (Intel + NVIDIA RTX) — `ghcr.io/dpietersz/bluefin-udx-nvidia:stable`.
+- **P14s Gen5 i7** (Intel + NVIDIA RTX) — `ghcr.io/dpietersz/bluefin-udx-nvidia:stable`; `ghcr.io/dpietersz/vitta-nvidia:testing` is available for owner-approved testing only.
 
 [Vitta](#vitta-stable--t580-first) is a personal, GNOME-free niri desktop on Universal Blue's desktop-less `base-main:44`. It reuses the shared UDX module set and adds the desktop plumbing Bluefin DX supplied; CI publishes `:testing`, date, and commit-SHA tags, while `:stable` advances only through an owner-triggered promotion.
 
@@ -102,6 +102,12 @@ sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/dpietersz/vitta:stab
 sudo systemctl reboot
 ```
 
+The NVIDIA Vitta testing image targets the ThinkPad P14s Gen 5, but that laptop is not switched to it yet; the owner decides when to test it. Its signed testing rebase is:
+
+```bash
+sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/dpietersz/vitta-nvidia:testing
+```
+
 The full acceptance and recovery checklist is [`docs/how-to/vitta-t580-acceptance.md`](docs/how-to/vitta-t580-acceptance.md). To return to the previous deployment:
 
 ```bash
@@ -113,6 +119,8 @@ CI publishes Vitta only as `:testing`, date, and commit-SHA tags. To deliberatel
 
 ```bash
 gh workflow run promote-vitta.yml -f source=testing -f confirm=promote
+# Promote the reviewed NVIDIA testing image instead:
+gh workflow run promote-vitta.yml -f image=vitta-nvidia -f source=testing -f confirm=promote
 ```
 
 The promotion workflow resolves the source to its registry digest, verifies its cosign signature, retags that exact digest as `:stable`, and verifies the stable reference. It is never run by `build.yml`. See the [design](docs/superpowers/specs/2026-11-06-vitta-design.md) and [implementation plan](docs/superpowers/plans/2026-11-06-vitta.md).
@@ -164,6 +172,8 @@ podman rm "$CID"
 # Build + smoke-test
 ./scripts/local-build-test.sh bluefin-udx
 ./scripts/local-build-test.sh bluefin-udx-nvidia
+./scripts/local-build-test.sh vitta
+./scripts/local-build-test.sh vitta-nvidia
 ```
 
 CI runs the same smoke-boot gate after building; the image is only pushed to ghcr if all expected binaries and config files are present.

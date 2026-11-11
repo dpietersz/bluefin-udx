@@ -3,6 +3,14 @@ name: Promote Vitta
 on:
   workflow_dispatch:
     inputs:
+      image:
+        description: "Image to promote"
+        required: true
+        default: vitta
+        type: choice
+        options:
+          - vitta
+          - vitta-nvidia
       source:
         description: "Source tag (testing, YYYYMMDD, sha7) or sha256:<digest>"
         required: true
@@ -27,10 +35,11 @@ jobs:
       - name: Require explicit confirmation
         env:
           CONFIRM: ${{ inputs.confirm }}
+          IMAGE_NAME: ${{ inputs.image }}
         run: |
           set -euo pipefail
           if [[ "$CONFIRM" != "promote" ]]; then
-            echo "::error::Type promote in the confirm input to retag Vitta as stable"
+            echo "::error::Type promote in the confirm input to retag ${IMAGE_NAME} as stable"
             exit 1
           fi
 
@@ -61,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${COSIGN_PRIVATE_KEY:-}" || {
-            echo "::error::SIGNING_SECRET is required to promote Vitta"
+            echo "::error::SIGNING_SECRET is required to promote the selected image"
             exit 1
           }
 
@@ -70,9 +79,10 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
-          IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}/vitta
+          IMAGE_NAME: ${{ inputs.image }}
         run: |
           set -euo pipefail
+          IMAGE_REGISTRY="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${IMAGE_NAME}"
           echo "$GHCR_TOKEN" | skopeo login ghcr.io \
             --username "$GHCR_USER" --password-stdin --authfile /tmp/auth.json
           mkdir -p "$HOME/.docker"
@@ -156,4 +166,4 @@ jobs:
           echo "source digest: $SOURCE_DIGEST"
           echo "stable digest: $STABLE_DIGEST"
           test "$SOURCE_DIGEST" = "$STABLE_DIGEST"
-          echo "Promoted Vitta without rebuilding: source digest == stable digest"
+          echo "Promoted image without rebuilding: source digest == stable digest"
