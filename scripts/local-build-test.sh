@@ -7,6 +7,7 @@
 #   ./scripts/local-build-test.sh                  # builds bluefin-udx
 #   ./scripts/local-build-test.sh bluefin-udx-nvidia
 #   ./scripts/local-build-test.sh vitta
+#   ./scripts/local-build-test.sh vitta-nvidia
 
 set -euo pipefail
 
@@ -74,17 +75,32 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
         RPM_VENDOR=$(rpm -q --qf "%{VENDOR}" "$1" 2>/dev/null || true)
         if [ "$RPM_VENDOR" = "$2" ]; then echo "  ok    $1 vendor: $RPM_VENDOR"; else echo "  FAIL  $1 vendor: ${RPM_VENDOR:-missing}, expected $2"; FAIL=1; fi
     }
+    # rpmdb integrity, asserted before anything that depends on it.
+    echo "rpm database integrity:"
+    if ! rpm -qa > /dev/null 2>&1; then
+        echo "  FAIL: rpmdb unreadable - image is corrupt, refusing to pass"
+        exit 1
+    fi
+    echo "  ok    rpmdb readable ($(rpm -qa | wc -l) packages)"
+    IS_VITTA=0
+    IS_NVIDIA=0
+    case "$RECIPE_NAME" in
+        vitta|vitta-nvidia) IS_VITTA=1 ;;
+    esac
+    case "$RECIPE_NAME" in
+        bluefin-udx-nvidia|vitta-nvidia) IS_NVIDIA=1 ;;
+    esac
 
     # Vitta = base-main + common.yml, no Bluefin layer. Assertions that
     # only hold because bluefin-dx supplied something are gated on this.
-    if [ "$RECIPE_NAME" = "vitta" ]; then
+    if [ "$IS_VITTA" = 1 ]; then
         echo "Vitta identity:"
         # Parse, do not grep a fixed spelling: the BlueBuild os-release
         # module writes every value double-quoted (ID="vitta"), which
         # os-release(5) treats as identical to ID=vitta.
         grep -E "^(ID|ID_LIKE|NAME|PRETTY_NAME|VARIANT_ID|IMAGE_ID)=" /etc/os-release | sed "s/^/  info  /"
         for OS_RELEASE_FILE in /etc/os-release /usr/lib/os-release; do
-            for OS_RELEASE_PAIR in ID=vitta ID_LIKE=fedora NAME=Vitta VARIANT_ID=vitta IMAGE_ID=vitta; do
+            for OS_RELEASE_PAIR in ID=vitta ID_LIKE=fedora NAME=Vitta VARIANT_ID=$RECIPE_NAME IMAGE_ID=$RECIPE_NAME; do
                 OS_RELEASE_KEY="${OS_RELEASE_PAIR%%=*}"
                 OS_RELEASE_WANT="${OS_RELEASE_PAIR#*=}"
                 OS_RELEASE_GOT=$(. "$OS_RELEASE_FILE" && printf %s "${!OS_RELEASE_KEY:-}" || true)
@@ -510,7 +526,7 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     # base without ublue akmods) changes the editor command - see MAINTENANCE.md.
     # Vitta has no zfs by design, so Terra resolves plain zed-cli; the
     # zeditor name dotfiles launch is the files/vitta symlink zeditor -> zed.
-    if [ "$RECIPE_NAME" = "vitta" ]; then
+    if [ "$IS_VITTA" = 1 ]; then
         if rpm -qf /usr/bin/zed 2>/dev/null | grep -q "^zed-cli-"; then
             echo "  ok    /usr/bin/zed owned by Terra zed-cli (no zfs on Vitta)"
         else
@@ -699,7 +715,7 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     else
         echo "  ok    fc-match serif is not a Nerd Font"
     fi
-    if [ "$RECIPE_NAME" = "vitta" ]; then
+    if [ "$IS_VITTA" = 1 ]; then
         MONASPACE_NEON_COUNT=$(ls /usr/share/fonts/monaspace-neon/*.otf | wc -l)
         if [ "$MONASPACE_NEON_COUNT" -eq 42 ]; then
             echo "  ok    Monaspace Neon has 42 OTF files"
@@ -770,13 +786,53 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
     # NVIDIA variant adds nvtop. CUDA toolkit intentionally not baked —
     # incompatible with atomic /usr/local redirect; use nvidia/cuda containers
     # per project instead. See bluefin-udx-nvidia.yml for full rationale.
-    if [ "$RECIPE_NAME" = "bluefin-udx-nvidia" ]; then
+    if [ "$IS_NVIDIA" = 1 ]; then
         echo "Phase 4 NVIDIA additions:"
         check_rpm nvtop
         check_bin nvtop
         # Base bluefin-dx-nvidia-open already provides:
         check_bin nvidia-smi
         check_bin nvidia-ctk
+    fi
+    if [ "$IS_VITTA" = 1 ] && [ "$IS_NVIDIA" = 1 ]; then
+        echo "Vitta NVIDIA boot integration:"
+        for p in kmod-nvidia nvidia-driver nvidia-container-toolkit; do check_rpm "$p"; done
+        NVIDIA_MODULE_DIR_COUNT=$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d | wc -l)
+        if [ "$NVIDIA_MODULE_DIR_COUNT" -eq 1 ]; then
+            echo "  ok    one kernel module directory"
+        else
+            echo "  FAIL  kernel module directories: $NVIDIA_MODULE_DIR_COUNT, expected one"
+            FAIL=1
+        fi
+        NVIDIA_SIGNER=$(modinfo -k "$VITTA_KVER" -F signer nvidia 2>/dev/null || true)
+        if [ -n "$NVIDIA_SIGNER" ]; then
+            echo "  ok    nvidia for $VITTA_KVER signed by: $NVIDIA_SIGNER"
+        else
+            echo "  FAIL  nvidia not resolvable or unsigned for kernel $VITTA_KVER"
+            FAIL=1
+        fi
+        check_file /usr/lib/bootc/kargs.d/10-vitta-nvidia.toml
+        for NVIDIA_KARG in rd.driver.blacklist=nouveau modprobe.blacklist=nouveau nvidia-drm.modeset=1 initcall_blacklist=simpledrm_platform_driver_init; do
+            if grep -Fq "\"$NVIDIA_KARG\"" /usr/lib/bootc/kargs.d/10-vitta-nvidia.toml; then
+                echo "  ok    vitta-nvidia karg $NVIDIA_KARG"
+            else
+                echo "  FAIL  vitta-nvidia karg missing: $NVIDIA_KARG"
+                FAIL=1
+            fi
+        done
+        if grep -Eq "^[[:space:]]*blacklist[[:space:]]+nouveau([[:space:]]|$)" /usr/lib/modprobe.d/nvidia.conf; then
+            echo "  ok    nvidia.conf blacklists nouveau"
+        else
+            echo "  FAIL  /usr/lib/modprobe.d/nvidia.conf lacks blacklist nouveau"
+            FAIL=1
+        fi
+        NVIDIA_CDI_STATE=$(systemctl is-enabled nvidia-cdi-refresh.path 2>/dev/null || true)
+        if [ "$NVIDIA_CDI_STATE" = enabled ]; then
+            echo "  ok    nvidia-cdi-refresh.path enabled"
+        else
+            echo "  FAIL  nvidia-cdi-refresh.path is ${NVIDIA_CDI_STATE:-missing}, expected enabled"
+            FAIL=1
+        fi
     fi
 
     exit $FAIL

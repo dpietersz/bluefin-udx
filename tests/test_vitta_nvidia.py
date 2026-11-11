@@ -77,5 +77,58 @@ class VittaNvidiaRecipeTests(unittest.TestCase):
         self.assertNotIn("- cuda-toolkit", self.recipe_text())
 
 
+class VittaNvidiaCiTests(unittest.TestCase):
+    BUILD_WORKFLOW = ROOT / ".github/workflows/build.yml"
+    LOCAL_GATE = ROOT / "scripts/local-build-test.sh"
+    PROMOTION_WORKFLOW = ROOT / ".github/workflows/promote-vitta.yml"
+
+    def test_matrix_has_testing_leg(self):
+        workflow = self.BUILD_WORKFLOW.read_text()
+        self.assertRegex(
+            workflow,
+            r"(?ms)^        include:\n.*?^          - recipe: vitta-nvidia\n            stream: testing$",
+        )
+
+    def test_publish_allow_list(self):
+        workflow = self.BUILD_WORKFLOW.read_text()
+        self.assertIn("vitta-nvidia:testing", workflow)
+        self.assertNotIn("vitta-nvidia:stable", workflow)
+
+    def test_gates_use_flags(self):
+        for gate in (self.BUILD_WORKFLOW, self.LOCAL_GATE):
+            with self.subTest(gate=gate):
+                text = gate.read_text()
+                self.assertRegex(text, r"vitta\|vitta-nvidia\).*IS_VITTA=1")
+                self.assertRegex(text, r"bluefin-udx-nvidia\|vitta-nvidia\).*IS_NVIDIA=1")
+                self.assertNotIn('"$RECIPE_NAME" = "vitta"', text)
+                self.assertNotIn('"$RECIPE_NAME" = "bluefin-udx-nvidia"', text)
+
+    def test_smoke_block_rules(self):
+        workflow = self.BUILD_WORKFLOW.read_text()
+        smoke = workflow[workflow.index("      - name: Smoke-boot test"):workflow.index("      # Push (only on main", workflow.index("      - name: Smoke-boot test"))]
+        run = smoke.split("        run: |\n", 1)[1]
+        self.assertNotIn("${{", run)
+        body = run.split("-c '\n", 1)[1].rsplit("\n          '", 1)[0]
+        self.assertNotIn("'", body)
+
+    def test_fedora_next_covers_recipe(self):
+        workflow = self.BUILD_WORKFLOW.read_text()
+        self.assertIn(
+            "RECIPES: recipes/common.yml recipes/vitta.yml recipes/vitta-modules.yml recipes/vitta-nvidia.yml",
+            workflow,
+        )
+
+    def test_promotion_takes_image(self):
+        workflow = self.PROMOTION_WORKFLOW.read_text()
+        self.assertRegex(workflow, r"(?ms)^      image:\n.*?^        type: choice$")
+        self.assertIn("          - vitta", workflow)
+        self.assertIn("          - vitta-nvidia", workflow)
+        self.assertIn("        default: vitta", workflow)
+        self.assertIn("IMAGE_NAME: ${{ inputs.image }}", workflow)
+        self.assertIn('IMAGE_REGISTRY="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${IMAGE_NAME}"', workflow)
+        self.assertNotIn("IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}/${IMAGE_NAME}", workflow)
+        self.assertNotIn("ghcr.io/${{ github.repository_owner }}/vitta\n", workflow)
+
+
 if __name__ == "__main__":
     unittest.main()
