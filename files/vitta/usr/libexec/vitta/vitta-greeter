@@ -20,4 +20,14 @@ export XDG_CONFIG_HOME="$GREETD_HOME/.config"
 export XDG_CACHE_HOME="$GREETD_HOME/.cache"
 export XDG_STATE_HOME="$GREETD_HOME/.local/state"
 
+# Pin cage only when a multi-GPU system identifies the panel-owning card. The
+# helper is deliberately advisory: any failure or unexpected output leaves
+# wlroots to select normally, so a broken helper cannot block the login path.
+unset WLR_DRM_DEVICES
+GPU_HELPER="${VITTA_GREETER_GPU_HELPER:-/usr/libexec/vitta/vitta-greeter-gpu}"
+GPU_DEVICE=$("$GPU_HELPER" 2>/dev/null || true)
+if [[ "$GPU_DEVICE" =~ ^/dev/dri/card[0-9]+$ ]]; then
+    export WLR_DRM_DEVICES="$GPU_DEVICE"
+fi
+
 exec cage -d -s -m last -- quickshell -p /usr/share/vitta/greeter/shell.qml
