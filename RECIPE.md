@@ -110,6 +110,14 @@ These Vitta-only rows cover every package and feature re-homed in `recipes/vitta
 
 Vitta-specific composition is deliberate: its full `files/vitta/` overlay runs after every rpm-ostree/akmods/brew module so greetd/PAM and restored keys win over package defaults. The last files module restores the RPM Fusion key that the akmods module removes. `qemu-user-static-aarch64` is removed because Vitta is x86 KVM only. `vitta-groups` reconciles `docker` and `libvirt` membership for **every** wheel user on every boot. The greeter launches only niri with `XDG_SESSION_TYPE=wayland`, `XDG_SESSION_DESKTOP=niri`, and `XDG_CURRENT_DESKTOP=niri:GNOME`. `vitta-theme` reads `/etc/vitta/theme.conf` to select its day/night mode; `vitta-greeter-preview` is the local visual-check entrypoint.
 
+### Vitta NVIDIA (current — `base-nvidia:44` testing image)
+
+| Package / feature | Source | Why baked | Fallback if source dies |
+|---|---|---|---|
+| `ghcr.io/ublue-os/base-nvidia:44` | Universal Blue | nvidia — Vitta NVIDIA base with the maintained NVIDIA driver stack for the ThinkPad P14s | retain the current Vitta base only after losing NVIDIA hardware support |
+| `nvtop` (Vitta NVIDIA) | Fedora repo / already present in `base-nvidia:44` | nvidia — explicit live-GPU-monitoring contract even though the base already supplies it | n/a while supplied by the base; otherwise retain Fedora's `nvtop` package |
+| `files/vitta-nvidia/usr/lib/bootc/kargs.d/10-vitta-nvidia.toml` | repository overlay | nvidia — retains the four required Nouveau-blacklist, NVIDIA DRM, and simpledrm boot arguments across `bootc switch` | retain an equivalent NVIDIA-only bootc kargs overlay |
+
 ### Phase 3f (current — Noctalia Screen Toolkit host dependencies)
 
 | Package | Source | Maintained by | Why baked | Fallback if source dies | Last reviewed |

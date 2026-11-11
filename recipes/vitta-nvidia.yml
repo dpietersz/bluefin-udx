@@ -1,0 +1,49 @@
+# vitta-nvidia — personal niri desktop for the ThinkPad P14s hybrid GPU
+# base-nvidia supplies the NVIDIA driver stack that base-main deliberately lacks.
+# The kargs overlay below keeps the required NVIDIA boot arguments in the image;
+# it also stops `bootc switch` from a Bluefin deployment removing them.
+# CUDA toolkit stays out of the image: see recipes/bluefin-udx-nvidia.yml for
+# the atomic-filesystem rationale and the per-project container workflow.
+
+name: vitta-nvidia
+description: Vitta — personal niri desktop on Universal Blue base-nvidia
+base-image: ghcr.io/ublue-os/base-nvidia
+image-version: 44
+
+modules:
+  - type: files
+    files:
+      - source: system
+        destination: /
+  - from-file: common.yml
+  # Vitta-only: files/vitta overlay + what bluefin-dx used to supply (keyring,
+  # portals, brew, docker, libvirt, tailscale, VS Code, v4l2loopback).
+  - from-file: vitta-modules.yml
+
+  # NVIDIA-only boot arguments for the P14s. Keep this private overlay out of
+  # the base Vitta image so it remains safe for its Intel/AMD target.
+  - type: files
+    files:
+      - source: vitta-nvidia
+        destination: /
+
+  - type: rpm-ostree
+    install:
+      # base-nvidia:44 already supplies nvtop; list it to make the NVIDIA
+      # package contract explicit, like the Noto-font contract in vitta-modules.
+      - nvtop
+
+  # Keep this after every other module except initramfs: earlier modules and
+  # their scripts still see Fedora's identity, while boot entries see Vitta.
+  - type: os-release
+    properties:
+      ID: vitta
+      ID_LIKE: fedora
+      NAME: "Vitta"
+      PRETTY_NAME: "Vitta 44 (NVIDIA)"
+      VARIANT_ID: vitta-nvidia
+      IMAGE_ID: vitta-nvidia
+
+  # Last on purpose: capture every earlier change, including NVIDIA boot args
+  # and the Vitta identity, in the bootc initramfs.
+  - type: initramfs
