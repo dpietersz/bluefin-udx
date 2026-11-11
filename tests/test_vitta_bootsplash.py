@@ -8,10 +8,13 @@ and the recipe wiring.
 """
 
 import ast
+import os
 from pathlib import Path
 import re
 import struct
+import subprocess
 import sys
+import tempfile
 import tomllib
 import unittest
 import zlib
@@ -26,6 +29,14 @@ LOGIN = ROOT / "files/vitta/usr/share/vitta/greeter/LoginScreen.qml"
 ASSETS = ROOT / "scripts/vitta-bootsplash-assets.py"
 WORDMARK_SOURCE = ROOT / "docs/superpowers/specs/assets/logo-final/lenovo-wordmark-dark.png"
 SMOKE_GATES = (ROOT / ".github/workflows/build.yml", ROOT / "scripts/local-build-test.sh")
+STOCK_DEFAULTS = """# Distribution defaults. Changes to this file will get overwritten during
+# upgrades.
+[Daemon]
+Theme=bgrt
+ShowDelay=0
+DeviceTimeout=8
+UseSimpledrmNoLuks=1
+"""
 
 
 def png_header(path):
@@ -254,14 +265,99 @@ class BootsplashTests(unittest.TestCase):
     def test_default_theme_script_targets_plymouthd_defaults(self):
         text = (ROOT / "files/scripts/vitta-plymouth-theme.sh").read_text()
         self.assertEqual(text.splitlines()[0], "#!/bin/bash")
-        self.assertIn("DEFAULTS=/usr/share/plymouth/plymouthd.defaults", text)
+        self.assertIn("/usr/share/plymouth/plymouthd.defaults", text)
         self.assertIn("sed -i 's/^Theme=.*/Theme=vitta/' \"${DEFAULTS}\"", text)
         self.assertNotIn("plymouth-set-default-theme vitta", text)
+
+    def test_theme_script_pins_device_scale(self):
+        script = ROOT / "files/scripts/vitta-plymouth-theme.sh"
+        text = script.read_text()
+        # The fixture executes the shipped script only after it exposes every
+        # image path as an override, so this test cannot write host /usr or /etc.
+        self.assertIn('DEFAULTS=${DEFAULTS:-/usr/share/plymouth/plymouthd.defaults}', text)
+        self.assertIn('CONF=${CONF:-/etc/plymouth/plymouthd.conf}', text)
+        self.assertIn('THEME=${THEME:-/usr/share/plymouth/themes/vitta/vitta.plymouth}', text)
+
+        variants = {
+            "stock": STOCK_DEFAULTS,
+            "commented": STOCK_DEFAULTS.replace("Theme=bgrt", "Theme=bgrt\n#DeviceScale=2"),
+            "existing": STOCK_DEFAULTS.replace("Theme=bgrt", "Theme=bgrt\nDeviceScale=2"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            tmp = Path(directory)
+            fake_bin = tmp / "bin"
+            plugin_dir = tmp / "plugins"
+            fake_bin.mkdir()
+            plugin_dir.mkdir()
+            (plugin_dir / "script.so").touch()
+            theme = tmp / "vitta.plymouth"
+            theme.write_text("[Plymouth Theme]\n")
+            (fake_bin / "plymouth").write_text(
+                "#!/bin/bash\n"
+                "if [ \"$1\" = --get-splash-plugin-path ]; then\n"
+                "  printf '%s/\\n' \"$VITTA_TEST_PLUGIN_DIR\"\n"
+                "fi\n"
+            )
+            (fake_bin / "plymouth-set-default-theme").write_text("#!/bin/bash\necho vitta\n")
+            for executable in fake_bin.iterdir():
+                executable.chmod(0o755)
+
+            def run(defaults):
+                defaults_path = tmp / "plymouthd.defaults"
+                conf_path = tmp / "plymouthd.conf"
+                defaults_path.write_text(defaults)
+                conf_path.write_text("[Daemon]\n")
+                result = subprocess.run(
+                    ["bash", str(script)],
+                    env=os.environ | {
+                        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                        "DEFAULTS": str(defaults_path),
+                        "CONF": str(conf_path),
+                        "THEME": str(theme),
+                        "VITTA_TEST_PLUGIN_DIR": str(plugin_dir),
+                    },
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                )
+                return result, defaults_path
+
+            for name, defaults in variants.items():
+                with self.subTest(variant=name):
+                    result, defaults_path = run(defaults)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    written = defaults_path.read_text()
+                    self.assertEqual(
+                        [(section, line) for section, line in self._device_scale_lines(written)],
+                        [("Daemon", "DeviceScale=1")],
+                    )
+                    repeat, repeated_path = run(written)
+                    self.assertEqual(repeat.returncode, 0, repeat.stderr)
+                    self.assertEqual(repeated_path.read_text(), written)
+
+            malformed = STOCK_DEFAULTS + "\n[Other]\nDeviceScale=2\n"
+            result, defaults_path = run(malformed)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(defaults_path.read_text(), malformed)
+
+    @staticmethod
+    def _device_scale_lines(defaults):
+        section = None
+        found = []
+        for line in defaults.splitlines():
+            match = re.fullmatch(r"\[([^]]+)\]", line)
+            if match:
+                section = match.group(1)
+            elif re.match(r"^\s*DeviceScale\s*=", line):
+                found.append((section, line))
+        return found
 
     def test_smoke_gates_check_theme_default_and_initramfs(self):
         needles = (
             "check_rpm plymouth-plugin-script",
             'grep -qx "Theme=vitta" /usr/share/plymouth/plymouthd.defaults',
+            'grep -q "^DeviceScale=1$" /usr/share/plymouth/plymouthd.defaults',
             'for VITTA_KVER in $(rpm -q --qf "%{VERSION}-%{RELEASE}.%{ARCH}\\n" kernel-core 2>/dev/null || true); do',
             '"/usr/lib/modules/$VITTA_KVER/vmlinuz"',
             'VITTA_INITRAMFS_CANDIDATES=$((VITTA_INITRAMFS_CANDIDATES + 1))',
@@ -269,6 +365,11 @@ class BootsplashTests(unittest.TestCase):
             'VITTA_LSINITRD=$(lsinitrd "$VITTA_INITRAMFS" 2>/dev/null || true)',
             "usr/lib64/plymouth/script.so",
             'lsinitrd -f usr/share/plymouth/plymouthd.defaults "$VITTA_INITRAMFS"',
+            'grep -q "^DeviceScale=1$"',
+            'grep -q "/i915\\.ko"',
+            'lsinitrd -f etc/cmdline.d/20-force_drivers.conf "$VITTA_INITRAMFS"',
+            'grep -q "^rd.driver.pre=i915$"',
+            'usr/lib/modprobe.d/nvidia.conf',
             "for VITTA_DRACUT_MOD in ostree systemd plymouth vitta-plymouth-font; do",
             # LUKS prompt font (R25) inside the exact kernel initramfs.
             "usr/lib64/plymouth/label-freetype.so",
@@ -315,7 +416,7 @@ def script_geometry(code, width, height):
 class LuksPromptTests(unittest.TestCase):
     """LUKS prompt screen, ruling R25 (docs/superpowers/specs/2026-11-08-vitta-luks-prompt-design.md)."""
 
-    SIZES = ((1920, 1080), (1366, 768), (2560, 1440), (1280, 800), (3840, 2160), (1024, 768))
+    SIZES = ((1920, 1080), (1366, 768), (2560, 1440), (2560, 1600), (1280, 800), (3840, 2160), (1024, 768))
 
     @classmethod
     def setUpClass(cls):
@@ -487,6 +588,7 @@ class LuksPromptTests(unittest.TestCase):
 
     def test_preview_harness_renders_text_like_the_initramfs(self):
         render = (ROOT / "scripts/bootsplash-preview/render.sh").read_text()
+        self.assertIn("2560x1600", render)
         self.assertIn('rm -f "${PLUGIN_DIR}label-pango.so"', render)
         self.assertIn("mv /usr/bin/fc-match /usr/bin/fc-match.off", render)
         self.assertIn('ln -sfn "$FONT_DIR/MonaspaceNeon-Regular.otf" /usr/share/fonts/Plymouth-monospace.ttf', render)

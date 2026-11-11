@@ -701,6 +701,7 @@ jobs:
                 fi
                 VITTA_PLY_THEME=$(plymouth-set-default-theme 2>/dev/null || true)
                 if [ "$VITTA_PLY_THEME" = vitta ] && grep -qx "Theme=vitta" /usr/share/plymouth/plymouthd.defaults; then echo "  ok    default Plymouth theme vitta (plymouthd.defaults)"; else echo "  FAIL  default Plymouth theme is ${VITTA_PLY_THEME:-unset}, expected vitta from /usr/share/plymouth/plymouthd.defaults"; FAIL=1; fi
+                if grep -q "^DeviceScale=1$" /usr/share/plymouth/plymouthd.defaults; then echo "  ok    plymouthd.defaults pins DeviceScale=1"; else echo "  FAIL  plymouthd.defaults does not pin DeviceScale=1"; FAIL=1; fi
                 if grep -Eq "^[[:space:]]*Theme[[:space:]]*=" /etc/plymouth/plymouthd.conf 2>/dev/null; then echo "  FAIL  /etc/plymouth/plymouthd.conf sets Theme=, outranking plymouthd.defaults"; FAIL=1; else echo "  ok    /etc/plymouth/plymouthd.conf leaves Theme= to the defaults"; fi
                 VITTA_INITRAMFS=""
                 VITTA_INITRAMFS_CANDIDATES=0
@@ -726,6 +727,12 @@ jobs:
                     if printf "%s\n" "$VITTA_LSINITRD" | grep -qF " $VITTA_INITRD_FILE"; then echo "  ok    initramfs has $VITTA_INITRD_FILE"; else echo "  FAIL  initramfs ${VITTA_INITRAMFS:-?} lacks $VITTA_INITRD_FILE"; FAIL=1; fi
                 done
                 if [ -n "$VITTA_LSINITRD" ] && lsinitrd -f usr/share/plymouth/plymouthd.defaults "$VITTA_INITRAMFS" 2>/dev/null | grep -qx "Theme=vitta"; then echo "  ok    initramfs plymouthd.defaults: Theme=vitta"; else echo "  FAIL  initramfs plymouthd.defaults does not select vitta"; FAIL=1; fi
+                if [ -n "$VITTA_LSINITRD" ] && lsinitrd -f usr/share/plymouth/plymouthd.defaults "$VITTA_INITRAMFS" 2>/dev/null | grep -q "^DeviceScale=1$"; then echo "  ok    initramfs plymouthd.defaults: DeviceScale=1"; else echo "  FAIL  initramfs plymouthd.defaults does not pin DeviceScale=1"; FAIL=1; fi
+                if [ -n "$VITTA_LSINITRD" ] && printf "%s\n" "$VITTA_LSINITRD" | grep -q "/i915\.ko"; then echo "  ok    initramfs has i915 KMS driver"; else echo "  FAIL  initramfs lacks i915 KMS driver"; FAIL=1; fi
+                if [ "$IS_VITTA" = 1 ] && [ "$IS_NVIDIA" = 1 ]; then
+                    if [ -n "$VITTA_LSINITRD" ] && lsinitrd -f etc/cmdline.d/20-force_drivers.conf "$VITTA_INITRAMFS" 2>/dev/null | grep -q "^rd.driver.pre=i915$"; then echo "  ok    initramfs forces i915 before Plymouth"; else echo "  FAIL  initramfs does not force i915 before Plymouth"; FAIL=1; fi
+                    if [ -n "$VITTA_LSINITRD" ] && printf "%s\n" "$VITTA_LSINITRD" | grep -qF " usr/lib/modprobe.d/nvidia.conf"; then echo "  ok    initramfs has NVIDIA modprobe policy"; else echo "  FAIL  initramfs lacks usr/lib/modprobe.d/nvidia.conf"; FAIL=1; fi
+                fi
                 if [ -n "$VITTA_LSINITRD" ] && printf "%s\n" "$VITTA_LSINITRD" | grep -qF " usr/lib/modprobe.d/99-vitta-v4l2loopback.conf" && lsinitrd -f usr/lib/modprobe.d/99-vitta-v4l2loopback.conf "$VITTA_INITRAMFS" 2>/dev/null | grep -q "video_nr=10"; then echo "  ok    initramfs pins v4l2loopback video_nr=10"; else echo "  FAIL  initramfs lacks usr/lib/modprobe.d/99-vitta-v4l2loopback.conf with video_nr=10"; FAIL=1; fi
                 # label-freetype loads only these two paths: Plymouth-monospace.ttf for the prompt text, Plymouth.ttf otherwise.
                 for VITTA_FONT_LINK in "Plymouth-monospace.ttf -> /usr/share/fonts/monaspace-neon/MonaspaceNeon-Regular.otf" "Plymouth.ttf -> /usr/share/fonts/monaspace-neon/MonaspaceNeon-Bold.otf"; do
