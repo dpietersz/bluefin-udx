@@ -169,7 +169,7 @@ shot "bootsplash-boot-t8s" 6
 stop_all
 
 # --- 3. other common sizes: LUKS prompt screen with 8 typed characters ---------
-for size in ${EXTRA_SIZES:-1366x768 1280x800 1920x1200 2560x1440 3840x2160 1024x768}; do
+for size in ${EXTRA_SIZES:-1366x768 1280x800 1920x1200 2560x1440 2560x1600 3840x2160 1024x768}; do
   W=${size%x*}; H=${size#*x}
   start_x "$size"
   start_plymouth updates "plymouthd-$size-updates"
