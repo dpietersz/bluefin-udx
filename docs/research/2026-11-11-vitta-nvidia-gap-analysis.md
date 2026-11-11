@@ -37,6 +37,7 @@ supplies it (directly or through the designated existing Vitta package);
 | `00-nvidia.toml`: `rd.driver.blacklist=nouveau`, `modprobe.blacklist=nouveau`, `nvidia-drm.modeset=1`, `initcall_blacklist=simpledrm_platform_driver_init` (in that order) | karg | Present, unowned `/usr/lib/bootc/kargs.d/00-nvidia.toml` | Absent; `/usr/lib/bootc/kargs.d` empty | All four are in the live P14s `/proc/cmdline`; Intel `i915` and NVIDIA `nvidia` bind the two GPUs | **ADD** | `files/vitta-nvidia/usr/lib/bootc/kargs.d/00-nvidia.toml` | `podman run --rm --entrypoint /bin/bash ghcr.io/ublue-os/bluefin-dx-nvidia-open:stable -c 'cat /usr/lib/bootc/kargs.d/00-nvidia.toml'`; `podman run --rm --entrypoint /bin/bash ghcr.io/ublue-os/base-nvidia:44 -c 'find /usr/lib/bootc/kargs.d -type f -print'`; `cat /proc/cmdline`; `lspci -nnk` |
 | `fprintd` | rpm | `fprintd-1.94.5-5.fc44.x86_64` | Absent | P14s has the package and the dotfiles fingerprint template detects its `06cb:00f9` sensor; current Vitta lacks the package | **ADD** | shared `recipes/vitta-modules.yml` (Task 6) | `podman run --rm --entrypoint rpm ghcr.io/dpietersz/vitta:stable -q fprintd`; `rpm -q fprintd`; `git -C ~/dotfiles grep -n '06cb:00f9' main -- .chezmoi.toml.tmpl` |
 | `fprintd-pam` | rpm | `fprintd-pam-1.94.5-5.fc44.x86_64` | Absent | P14s has it; dotfiles' fingerprint PAM script explicitly requires it; current Vitta lacks it | **ADD** | shared `recipes/vitta-modules.yml` (Task 6) | `podman run --rm --entrypoint rpm ghcr.io/dpietersz/vitta:stable -q fprintd-pam`; `rpm -q fprintd-pam`; `git -C ~/dotfiles grep -n 'fprintd-pam' main -- .chezmoiscripts/run_once_after_10-enable-fingerprint-pam.sh.tmpl` |
+| `/usr/lib/udev/rules.d/70-libfprint-2.rules` | file | Present; owned by `libfprint` | Absent | It creates the P14s ELAN SPI fingerprint-device binding. `fprintd` requires `libfprint-2.so.2`, so the existing `fprintd` ADD brings this rule transitively. | **ADD** (covered by existing `fprintd` ADD) | shared `recipes/vitta-modules.yml` (Task 6) | `podman run --rm --entrypoint /bin/bash ghcr.io/ublue-os/bluefin-dx-nvidia-open:stable -c 'rpm -q --requires fprintd; rpm -qf /usr/lib/udev/rules.d/70-libfprint-2.rules'` |
 | `nvtop` | rpm | `nvtop-3.3.2-1.fc44.x86_64` | `nvtop-3.3.2-1.fc44.x86_64` | Required explicit P14s NVIDIA tool contract; it is already supplied by the current base | **ADD** | `recipes/vitta-nvidia.yml` | `podman run --rm --entrypoint rpm ghcr.io/ublue-os/base-nvidia:44 -q nvtop` |
 | `bolt` and `/usr/lib/udev/rules.d/90-bolt.rules` | rpm/file/unit | Present | RPM absent | `bolt.service` is active on P14s | **HAVE** | existing `recipes/vitta-modules.yml` | `systemctl is-active bolt.service`; `podman run --rm --entrypoint rpm ghcr.io/dpietersz/vitta:stable -q bolt` |
 | `ydotool` and `ydotool.service` | rpm/unit | Present | RPM absent | Dotfiles start `ydotoold` and use `ydotool key` after lock release; system unit itself is intentionally disabled | **HAVE** | existing `recipes/vitta-modules.yml` | `git -C ~/dotfiles grep -n -E 'ydotoold|ydotool key' main -- dot_local/bin/scripts`; `podman run --rm --entrypoint rpm ghcr.io/dpietersz/vitta:stable -q ydotool` |
@@ -50,13 +51,198 @@ supplies it (directly or through the designated existing Vitta package);
 | `nvidia.conf`, NVIDIA udev rules (`60-nvidia*`, `71-nvidia-controllers.rules`, `99-nvidia-cdi-refresh.rules`), and NVIDIA CDI presets | file | Present | Present | Base owns the NVIDIA stack; no Bluefin-specific copy is needed | **HAVE** | `base-nvidia` | `podman run --rm --entrypoint /bin/bash ghcr.io/ublue-os/base-nvidia:44 -c 'rpm -qf /usr/lib/modprobe.d/nvidia.conf /usr/lib/udev/rules.d/60-nvidia.rules /usr/lib/systemd/system-preset/70-nvidia-cdi-refresh.preset'` |
 
 `nvidia-powerd.service` is also present in both images and disabled in both; it
-is not a Bluefin delta. The focused comparison found no NVIDIA/hybrid-named
-file in `environment.d` or SELinux overlays which is absent from
-`base-nvidia:44`:
+is not a Bluefin delta.
+
+## Category-complete integration-file comparison
+
+The earlier filename-only environment/SELinux check was insufficient. I
+re-ran a content comparison for every requested category. The commands below
+are the exact read-only capture: `scan_image` invokes **one** `podman run` for
+each image, writes the `find -printf "%p %s\n"` inventory and per-file SHA-256
+manifest under `/tmp`, then compares the two captured manifests. The third
+local-image capture is solely the required current-Vitta equivalence check; no
+image was pulled.
 
 ```bash
-podman run --rm --entrypoint /bin/bash ghcr.io/ublue-os/base-nvidia:44 -c 'for d in /usr/lib/environment.d /etc/environment.d /usr/lib/selinux /etc/selinux; do [ -d "$d" ] && find "$d" -type f \( -iname "*nvidia*" -o -iname "*vfio*" -o -iname "*gpu*" \) -print; done'
+set -euo pipefail
+export LC_ALL=C
+work=/tmp/vitta-nvidia-integration-comparison
+rm -rf "$work" && mkdir -p "$work"
+cat > "$work/container-scan.sh" <<'CONTAINER'
+set -euo pipefail
+sizes=/tmp/category-file-sizes
+{
+  for d in \
+    /usr/lib/bootc/kargs.d \
+    /usr/lib/dracut/dracut.conf.d \
+    /usr/lib/modprobe.d /etc/modprobe.d \
+    /usr/lib/modules-load.d /etc/modules-load.d \
+    /usr/lib/udev/rules.d /etc/udev/rules.d \
+    /usr/lib/environment.d /etc/environment.d /etc/profile.d \
+    /usr/lib/systemd/system-preset /usr/lib/systemd/user-preset \
+    /usr/share/X11/xorg.conf.d /etc/X11/xorg.conf.d \
+    /etc/nvidia-container-runtime /etc/cdi; do
+    [ -d "$d" ] && find "$d" -type f -printf '%p %s\n'
+  done
+  [ -f /etc/environment ] && find /etc/environment -type f -printf '%p %s\n'
+  for d in /usr/share/glvnd /usr/share/vulkan /etc/vulkan; do
+    [ -d "$d" ] && find "$d" -type f -name '*.json' -printf '%p %s\n'
+  done
+  [ -d /usr/share/selinux ] && find /usr/share/selinux -type f -iname '*nvidia*' -printf '%p %s\n'
+  for d in /usr/lib/systemd/system /usr/lib/systemd/user; do
+    [ -d "$d" ] || continue
+    while IFS= read -r -d '' f; do
+      name=${f##*/}
+      if [[ $name =~ (nvidia|nvctk|supergfx|switcheroo|prime|gpu|fprint|bolt|thunderbolt) ]] || grep -IqiE 'nvidia|nvctk|supergfx|switcheroo|prime|gpu|fprint|bolt|thunderbolt' "$f"; then
+        find "$f" -type f -printf '%p %s\n'
+      fi
+    done < <(find "$d" -type f -print0)
+  done
+} | sort -u > "$sizes"
+printf '%s\n' '--- SIZES ---'; cat "$sizes"
+printf '%s\n' '--- SHA256 ---'
+while IFS=' ' read -r path size; do sha256sum "$path"; done < "$sizes" | sort -k2,2
+CONTAINER
+scan_image() {
+  local label=$1 image=$2
+  podman run --rm --entrypoint /bin/bash "$image" -c "$(< "$work/container-scan.sh")" > "$work/$label.manifest"
+  awk '/^--- SIZES ---/{s="sizes";next} /^--- SHA256 ---/{s="sha";next} s=="sizes"{print}' "$work/$label.manifest" > "$work/$label.sizes"
+  awk '/^--- SHA256 ---/{s=1;next} s{print}' "$work/$label.manifest" > "$work/$label.sha256"
+  awk '{print $1}' "$work/$label.sizes" > "$work/$label.paths"
+  awk '{print $2 " " $1}' "$work/$label.sha256" > "$work/$label.path-sha"
+}
+scan_image bluefin ghcr.io/ublue-os/bluefin-dx-nvidia-open:stable
+scan_image base ghcr.io/ublue-os/base-nvidia:44
+scan_image vitta ghcr.io/dpietersz/vitta:stable
+comm -23 "$work/bluefin.paths" "$work/base.paths" > "$work/bluefin-only.paths"
+join -j 1 "$work/bluefin.path-sha" "$work/base.path-sha" |
+  awk '$2 != $3 {print $1 "\tbluefin=" $2 "\tbase=" $3}' > "$work/differing.paths"
 ```
+
+The capture contains 341 Bluefin, 296 base-NVIDIA, and 287 current-Vitta
+candidate files. It found **89 Bluefin-only** paths and **12 same-path content
+differences** (101 dispositions below). Against current Vitta, 18 are
+byte-identical, 13 differ, and 70 are absent. Thus all requested
+`kargs.d`, dracut, modprobe, modules-load, udev, environment/profile,
+preset, selected system/user-unit, Xorg, GLVND/Vulkan, CDI, and NVIDIA SELinux
+locations were considered. The scan found no candidate files in the requested
+Xorg, GLVND/Vulkan JSON, NVIDIA-container/CDI, or NVIDIA-SELinux categories.
+
+`exact` below means byte-identical to current `vitta:stable`; `different` means
+Vitta has the path but different content. Every `DROP` follows the task rule:
+it is neither an active P14s/dotfiles requirement nor an NVIDIA/hybrid
+integration file needed by this P14s. Bluefin/GNOME baseline items retain the
+already-recorded disposition in the [2026-11-06 gap analysis](2026-11-06-vitta-gap-analysis.md#non-rpm-integration-file-triage).
+
+| Bluefin-only or differing file | Current Vitta result | Verdict and evidence |
+|---|---|---|
+| `/etc/modprobe.d/kvm.conf` | exact | **HAVE** — Vitta's existing KVM stack supplies it. |
+| `/etc/modprobe.d/tuned.conf` | exact | **HAVE** — Vitta already supplies `tuned`. |
+| `/etc/modprobe.d/vhost.conf` | exact | **HAVE** — Vitta's existing VM stack supplies it. |
+| `/etc/modules-load.d/ip_tables.conf` | absent | **DROP** — Bluefin compatibility module; no P14s evidence. |
+| `/etc/profile.d/90-bluefin-starship.sh` | absent | **DROP** — Bluefin branding; 2026-11-06 baseline triage. |
+| `/etc/profile.d/91-bluefin-aliases.sh` | absent | **DROP** — Bluefin branding; 2026-11-06 baseline triage. |
+| `/etc/profile.d/brew-bash-completion.sh` | absent | **DROP** — Vitta's brew module owns its own profile integration. |
+| `/etc/profile.d/brew.sh` | different | **DROP** — Vitta's brew module provides the target-specific variant. |
+| `/etc/profile.d/ccache.csh` | absent | **DROP** — no P14s/dotfiles evidence. |
+| `/etc/profile.d/ccache.sh` | absent | **DROP** — no P14s/dotfiles evidence. |
+| `/etc/profile.d/gnome-ssh-askpass.csh` | absent | **DROP** — GNOME baseline; 2026-11-06 triage. |
+| `/etc/profile.d/gnome-ssh-askpass.sh` | absent | **DROP** — GNOME baseline; 2026-11-06 triage. |
+| `/etc/profile.d/guestfish.sh` | absent | **DROP** — no P14s/dotfiles evidence. |
+| `/etc/profile.d/open.sh` | absent | **DROP** — Bluefin baseline; 2026-11-06 triage. |
+| `/etc/profile.d/ublue-fastfetch.sh` | absent | **DROP** — Bluefin branding; 2026-11-06 triage. |
+| `/etc/profile.d/ublue-motd.sh` | absent | **DROP** — Bluefin branding; 2026-11-06 triage. |
+| `/etc/profile.d/uutils.sh` | absent | **DROP** — no P14s/dotfiles evidence. |
+| `/etc/profile.d/vte.csh` | exact | **HAVE** — equivalent Vitta profile exists. |
+| `/etc/profile.d/vte.sh` | exact | **HAVE** — equivalent Vitta profile exists. |
+| `/etc/environment` | different | **DROP** — Bluefin session environment delta, not NVIDIA/hybrid integration. |
+| `/usr/lib/bootc/kargs.d/00-nvidia.toml` | absent | **ADD** — required P14s NVIDIA arguments; `files/vitta-nvidia/usr/lib/bootc/kargs.d/00-nvidia.toml`. |
+| `/usr/lib/dracut/dracut.conf.d/80-vfio.conf` | absent | **DROP** — no PCI hostdev in `windows-work`; covered by the VFIO row above. |
+| `/usr/lib/dracut/dracut.conf.d/90-passkeys-tpm.conf` | absent | **DROP** — no active P14s/dotfiles evidence. |
+| `/usr/lib/modprobe.d/98-v4l2loopback.conf` | exact | **HAVE** — existing shared Vitta virtual-camera configuration. |
+| `/usr/lib/modprobe.d/amd-legacy.conf` | absent | **DROP** — P14s uses Intel `i915` plus NVIDIA, not legacy AMD. |
+| `/usr/lib/modprobe.d/i2c-dev.conf` | exact | **HAVE** — equivalent Vitta configuration exists. |
+| `/usr/lib/modules-load.d/ddcutil.conf` | exact | **HAVE** — equivalent Vitta configuration exists. |
+| `/usr/lib/modules-load.d/i2c-tools.conf` | exact | **HAVE** — equivalent Vitta configuration exists. |
+| `/usr/lib/modules-load.d/pkcs8.conf` | absent | **DROP** — no P14s/dotfiles evidence. |
+| `/usr/lib/modules-load.d/scsi_dh.conf` | absent | **DROP** — no P14s/dotfiles evidence. |
+| `/usr/lib/modules-load.d/v4l2loopback.conf` | exact | **HAVE** — existing shared Vitta virtual-camera configuration. |
+| `/usr/lib/modules-load.d/zfs.conf` | absent | **DROP** — ZFS is excluded. |
+| `/usr/lib/systemd/system-preset/01-homebrew.preset` | absent | **DROP** — Vitta's brew module owns its own target preset. |
+| `/usr/lib/systemd/system-preset/01-uupd.preset` | absent | **DROP** — Bluefin updater baseline; 2026-11-06 triage. |
+| `/usr/lib/systemd/system-preset/50-zfs.preset` | absent | **DROP** — ZFS is excluded. |
+| `/usr/lib/systemd/system-preset/80-workstation.preset` | absent | **DROP** — Bluefin workstation baseline; 2026-11-06 triage. |
+| `/usr/lib/systemd/system-preset/81-desktop.preset` | absent | **DROP** — Bluefin desktop baseline; 2026-11-06 triage. |
+| `/usr/lib/systemd/system-preset/99-supergfxd.preset` | absent | **DROP** — `supergfxd` is inactive/disabled; no dotfiles reference. |
+| `/usr/lib/systemd/system/bolt.service` | exact | **HAVE** — Vitta's `bolt` is active on the P14s. |
+| `/usr/lib/systemd/system/fprintd.service` | absent | **ADD** — supplied by the existing shared `fprintd` ADD (Task 6). |
+| `/usr/lib/systemd/system/supergfxd.service` | absent | **DROP** — inactive/disabled P14s service; no dotfiles reference. |
+| `/usr/lib/systemd/system/switcheroo-control.service` | exact | **HAVE** — Vitta's active hybrid-GPU service is byte-identical. |
+| `/usr/lib/udev/rules.d/10-osbuild-inhibitor.rules` | absent | **DROP** — Bluefin build baseline; 2026-11-06 triage. |
+| `/usr/lib/udev/rules.d/10-switch.rules` | different | **DROP** — Bluefin release delta, not NVIDIA/hybrid integration. |
+| `/usr/lib/udev/rules.d/11-dm-mpath.rules` | absent | **DROP** — multipath is unused. |
+| `/usr/lib/udev/rules.d/30-discrete-gpu.rules` | exact | **HAVE** — Vitta's `switcheroo-control` rule tags the P14s NVIDIA device. |
+| `/usr/lib/udev/rules.d/50-framework16.rules` | different | **DROP** — unrelated laptop hardware rule. |
+| `/usr/lib/udev/rules.d/50-steam-horipad-controller.rules` | different | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/50-usb-realtek-net.rules` | different | **DROP** — unrelated USB-network rule. |
+| `/usr/lib/udev/rules.d/60-arduino-mbed.rules` | different | **DROP** — no P14s/dotfiles evidence. |
+| `/usr/lib/udev/rules.d/60-ddcutil-i2c.rules` | exact | **HAVE** — equivalent Vitta display-I²C rule exists. |
+| `/usr/lib/udev/rules.d/60-mdevctl.rules` | exact | **HAVE** — existing Vitta VM stack supplies it. |
+| `/usr/lib/udev/rules.d/60-zvol.rules` | absent | **DROP** — ZFS is excluded. |
+| `/usr/lib/udev/rules.d/61-gnome-settings-daemon-rfkill.rules` | absent | **DROP** — GNOME baseline; 2026-11-06 triage. |
+| `/usr/lib/udev/rules.d/61-mutter.rules` | absent | **DROP** — GNOME baseline; 2026-11-06 triage. |
+| `/usr/lib/udev/rules.d/62-multipath.rules` | absent | **DROP** — multipath is unused. |
+| `/usr/lib/udev/rules.d/69-bcache.rules` | absent | **DROP** — bcache is unused. |
+| `/usr/lib/udev/rules.d/69-input-remapper-forwarded.rules` | absent | **DROP** — input-remapper is unused. |
+| `/usr/lib/udev/rules.d/69-libmtp.rules` | exact | **HAVE** — Vitta's retained `gvfs-mtp` supplies it. |
+| `/usr/lib/udev/rules.d/69-vdev.rules` | absent | **DROP** — no P14s/dotfiles evidence. |
+| `/usr/lib/udev/rules.d/70-libfprint-2.rules` | absent | **ADD** (covered) — `fprintd` pulls `libfprint`; see its main-table row. |
+| `/usr/lib/udev/rules.d/70-titan-key.rules` | different | **DROP** — no P14s/dotfiles evidence. |
+| `/usr/lib/udev/rules.d/70-u2f.rules` | different | **DROP** — no P14s/dotfiles evidence. |
+| `/usr/lib/udev/rules.d/70-wooting.rules` | different | **DROP** — unrelated keyboard rule. |
+| `/usr/lib/udev/rules.d/71-8bitdo-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-alpha_imaging_technology_co-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-astro_gaming-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-betop-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-bigscreen-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-cypress_semiconductor_corp-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-google-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-hori-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-htc-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-logitech-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-mad_catz-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-microsoft-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-nacon-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-nintendo-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-nvidia-gdu.rules` | absent | **DROP** — NVIDIA Shield controller only, not NVIDIA GPU integration. |
+| `/usr/lib/udev/rules.d/71-pdp-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-personal_communication_systems_inc-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-pid_codes-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-powera-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-raspberry_pi_ltd-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-razer-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-sony-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-thrustmaster-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-uinput-dev-early-creation.rules` | different | **HAVE** — Vitta has the equivalent static `/dev/uinput` + `uaccess` rule used by `ydotool`; Bluefin additionally guards `ACTION!="remove"`. |
+| `/usr/lib/udev/rules.d/71-valve-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-vkb_sim-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/71-zeroplus_technology_corporation-gdu.rules` | absent | **DROP** — unrelated controller rule. |
+| `/usr/lib/udev/rules.d/80-iio-sensor-proxy.rules` | absent | **DROP** — no P14s/dotfiles evidence. |
+| `/usr/lib/udev/rules.d/88-neutron_hifi_dac.rules` | different | **DROP** — unrelated audio-device rule. |
+| `/usr/lib/udev/rules.d/90-bolt.rules` | exact | **HAVE** — Vitta's active Thunderbolt authorisation rule is byte-identical. |
+| `/usr/lib/udev/rules.d/90-supergfxd-nvidia-pm.rules` | absent | **DROP** — owned by inactive `supergfxctl`; base NVIDIA already supplies its own stack. |
+| `/usr/lib/udev/rules.d/90-zfs.rules` | absent | **DROP** — ZFS is excluded. |
+| `/usr/lib/udev/rules.d/92-viia.rules` | different | **DROP** — unrelated USB-device rule. |
+| `/usr/lib/udev/rules.d/98-trace-cmd.rules` | absent | **DROP** — diagnostics tooling is unused. |
+| `/usr/lib/udev/rules.d/99-input-remapper.rules` | absent | **DROP** — input-remapper is unused. |
+| `/usr/lib/udev/rules.d/99-qat-vfio.rules` | exact | **HAVE** — existing Vitta VM stack supplies the identical Intel QAT/VFIO rule. |
+| `/usr/lib/udev/rules.d/99-z-dm-mpath-late.rules` | absent | **DROP** — multipath is unused. |
+
+This comparison adds no independent NVIDIA/hybrid ADD beyond the existing
+`00-nvidia.toml` row. The two fingerprint paths above are covered by the
+already-required shared `fprintd` package ADD; `fprintd`'s `libfprint`
+dependency supplies the ELAN rule. No item is undecidable, so the ASK section
+remains empty.
 
 ## Final ADD input for later tasks
 
