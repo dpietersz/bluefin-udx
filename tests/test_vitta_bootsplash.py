@@ -306,6 +306,7 @@ class BootsplashTests(unittest.TestCase):
                 defaults_path = tmp / "plymouthd.defaults"
                 conf_path = tmp / "plymouthd.conf"
                 defaults_path.write_text(defaults)
+                defaults_path.chmod(0o644)
                 conf_path.write_text("[Daemon]\n")
                 result = subprocess.run(
                     ["bash", str(script)],
@@ -332,14 +333,17 @@ class BootsplashTests(unittest.TestCase):
                         [(section, line) for section, line in self._device_scale_lines(written)],
                         [("Daemon", "DeviceScale=1")],
                     )
+                    self.assertEqual(defaults_path.stat().st_mode & 0o777, 0o644)
                     repeat, repeated_path = run(written)
                     self.assertEqual(repeat.returncode, 0, repeat.stderr)
                     self.assertEqual(repeated_path.read_text(), written)
+                    self.assertEqual(repeated_path.stat().st_mode & 0o777, 0o644)
 
             malformed = STOCK_DEFAULTS + "\n[Other]\nDeviceScale=2\n"
             result, defaults_path = run(malformed)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(defaults_path.read_text(), malformed)
+            self.assertEqual(defaults_path.stat().st_mode & 0o777, 0o644)
 
     @staticmethod
     def _device_scale_lines(defaults):

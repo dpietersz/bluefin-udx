@@ -127,6 +127,20 @@ class VittaGreeterGpuTests(unittest.TestCase):
                 check=False,
             )
 
+    def test_smoke_gates_isolate_greeter_gpu_sysfs(self):
+        gates = (ROOT / ".github/workflows/build.yml", ROOT / "scripts/local-build-test.sh")
+        for gate in gates:
+            with self.subTest(gate=gate.name):
+                invocations = [
+                    line for line in gate.read_text().splitlines()
+                    if "=$(" in line and "/usr/libexec/vitta/vitta-greeter-gpu" in line
+                ]
+                self.assertEqual(len(invocations), 2)
+                self.assertTrue(
+                    all("VITTA_SYSFS_ROOT=" in line for line in invocations),
+                    f"{gate.name}: every vitta-greeter-gpu invocation must set VITTA_SYSFS_ROOT",
+                )
+
     def test_launcher_exports_only_when_set(self):
         script = LAUNCHER.read_text()
         self.assertIn("WLR_DRM_DEVICES", script)
