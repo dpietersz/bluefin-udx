@@ -55,7 +55,9 @@ def redact(request, password):
     return logged
 
 
-def send_reply(connection, reply, split):
+def send_reply(connection, reply, split, delayed=False):
+    if delayed:
+        time.sleep(0.5)
     payload = frame(reply)
     if not split:
         connection.sendall(payload)
@@ -68,6 +70,10 @@ def send_reply(connection, reply, split):
     connection.sendall(payload[middle:])
 
 
+def send_raw_reply(connection, body):
+    connection.sendall(struct.pack("=I", len(body)) + body)
+
+
 def serve_client(connection, args, password, log, deadline):
     phase = "new"
     while True:
@@ -76,14 +82,23 @@ def serve_client(connection, args, password, log, deadline):
             return
         log.write(json.dumps(redact(request, password), ensure_ascii=False, separators=(",", ":")) + "\n")
         log.flush()
+        if args.script == "silent":
+            time.sleep(max(0, deadline - time.monotonic()))
+            return
         request_type = request.get("type")
         if request_type == "cancel_session":
-            send_reply(connection, {"type": "success"}, args.script == "split")
+            send_reply(connection, {"type": "success"}, args.script == "split", args.script == "delayed")
             phase = "new"
         elif request_type == "start_session":
-            send_reply(connection, {"type": "success"}, args.script == "split")
+            send_reply(connection, {"type": "success"}, args.script == "split", args.script == "delayed")
         elif request_type == "create_session":
-            if args.script == "multiprompt":
+            if args.script == "surrogate":
+                send_raw_reply(connection, b'{"type":"error","description":"\\ud800"}')
+                continue
+            if args.script == "unicode":
+                reply = {"type": "auth_message", "auth_message_type": "info", "auth_message": "café ü 😀"}
+                phase = "done"
+            elif args.script == "multiprompt":
                 reply = {"type": "auth_message", "auth_message_type": "visible", "auth_message": "Login: "}
                 phase = "multiprompt_password"
             else:
@@ -93,7 +108,7 @@ def serve_client(connection, args, password, log, deadline):
                 connection.sendall(frame(reply) + frame({"type": "success"}))
                 phase = "merged_owed"
             else:
-                send_reply(connection, reply, args.script == "split")
+                send_reply(connection, reply, args.script == "split", args.script == "delayed")
         elif request_type == "post_auth_message_response":
             if args.script == "merged" and phase == "merged_owed":
                 phase = "done"
@@ -116,15 +131,24 @@ def serve_client(connection, args, password, log, deadline):
             else:
                 reply = {"type": "error", "error_type": "auth_error", "description": "Authentication failed"}
                 phase = "new"
-            send_reply(connection, reply, args.script == "split")
+            send_reply(connection, reply, args.script == "split", args.script == "delayed")
         else:
-            send_reply(connection, {"type": "error", "error_type": "error", "description": "unexpected request"}, args.script == "split")
+            send_reply(
+                connection,
+                {"type": "error", "error_type": "error", "description": "unexpected request"},
+                args.script == "split",
+                args.script == "delayed",
+            )
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--socket", required=True)
-    parser.add_argument("--script", choices=("ok", "badpass", "multiprompt", "info", "split", "merged", "died"), required=True)
+    parser.add_argument(
+        "--script",
+        choices=("ok", "badpass", "multiprompt", "info", "split", "merged", "died", "silent", "delayed", "unicode", "surrogate"),
+        required=True,
+    )
     parser.add_argument("--password-file")
     parser.add_argument("--keep", action="store_true")
     parser.add_argument("--timeout", type=float, default=30)

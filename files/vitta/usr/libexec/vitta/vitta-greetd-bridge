@@ -1,43 +1,99 @@
 #!/usr/bin/python3
 """Line-delimited JSON bridge to greetd's framed Unix socket protocol."""
 
+import fcntl
 import json
 import os
+import select
 import socket
 import struct
 import sys
+import termios
+import time
 
 
 MAX_INPUT = 64 * 1024
 MAX_REPLY = 1024 * 1024
+CONNECT_TIMEOUT = 5
+DEFAULT_REPLY_TIMEOUT = 120.0
+
+
+class PeerClosedError(Exception):
+    """The greetd peer closed its socket before a complete reply arrived."""
+
+
+class StdinClosedError(Exception):
+    """The greeter closed stdin while a reply was outstanding."""
 
 
 def write_line(message):
-    sys.stdout.buffer.write(json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode() + b"\n")
-    sys.stdout.buffer.flush()
+    try:
+        line = json.dumps(message, ensure_ascii=True, separators=(",", ":")).encode("ascii") + b"\n"
+        sys.stdout.buffer.write(line)
+        sys.stdout.buffer.flush()
+    except BrokenPipeError:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, sys.stdout.fileno())
+        finally:
+            os.close(devnull)
+        return False
+    return True
 
 
 def bridge_error(description):
-    write_line({"type": "error", "error_type": "bridge", "description": description})
+    return write_line({"type": "error", "error_type": "bridge", "description": description})
 
 
-def receive_exact(connection, count):
+def reply_timeout():
+    try:
+        timeout = float(os.environ.get("VITTA_GREETD_BRIDGE_TIMEOUT", DEFAULT_REPLY_TIMEOUT))
+    except ValueError:
+        return DEFAULT_REPLY_TIMEOUT
+    return timeout if timeout > 0 else DEFAULT_REPLY_TIMEOUT
+
+
+def stdin_is_closed():
+    try:
+        available = fcntl.ioctl(sys.stdin.fileno(), termios.FIONREAD, struct.pack("I", 0))
+    except OSError:
+        return False
+    return struct.unpack("I", available)[0] == 0
+
+
+def wait_for_reply_data(connection, deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError
+    readable, _, _ = select.select([connection, sys.stdin.buffer], [], [], remaining)
+    if connection in readable:
+        return
+    if sys.stdin.buffer in readable and stdin_is_closed():
+        raise StdinClosedError
+    readable, _, _ = select.select([connection], [], [], max(0, deadline - time.monotonic()))
+    if not readable:
+        raise TimeoutError
+
+
+def receive_exact(connection, count, deadline=None):
     chunks = []
     while count:
+        if deadline is not None:
+            wait_for_reply_data(connection, deadline)
         chunk = connection.recv(count)
         if not chunk:
-            raise EOFError
+            raise PeerClosedError
         chunks.append(chunk)
         count -= len(chunk)
     return b"".join(chunks)
 
 
-def receive_reply(connection):
-    header = receive_exact(connection, 4)
+def receive_reply(connection, deadline):
+    header = receive_exact(connection, 4, deadline)
     (length,) = struct.unpack("=I", header)
     if length > MAX_REPLY:
         raise ValueError("greetd reply is too large")
-    body = receive_exact(connection, length)
+    body = receive_exact(connection, length, deadline)
     reply = json.loads(body.decode("utf-8"))
     if not isinstance(reply, dict):
         raise ValueError("greetd reply is not a JSON object")
@@ -51,17 +107,22 @@ def discard_remainder():
             return
 
 
-def main():
+def fail(description):
+    return 1 if bridge_error(description) else 0
+
+
+def run():
     socket_path = os.environ.get("GREETD_SOCK")
     if not socket_path:
-        bridge_error("GREETD_SOCK is not set")
-        return 1
+        return fail("GREETD_SOCK is not set")
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        connection.settimeout(CONNECT_TIMEOUT)
         connection.connect(socket_path)
+        connection.settimeout(None)
     except OSError:
-        bridge_error("could not connect to greetd")
-        return 1
+        connection.close()
+        return fail("could not connect to greetd")
 
     with connection:
         while True:
@@ -71,7 +132,8 @@ def main():
             if len(line) > MAX_INPUT + 1 or (len(line) == MAX_INPUT + 1 and not line.endswith(b"\n")):
                 if not line.endswith(b"\n"):
                     discard_remainder()
-                bridge_error("input line is too long")
+                if not bridge_error("input line is too long"):
+                    return 0
                 continue
             if line == b"\n":
                 continue
@@ -79,24 +141,34 @@ def main():
                 request = json.loads(line.decode("utf-8"))
                 if not isinstance(request, dict):
                     raise ValueError
-            except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-                bridge_error("input is not a JSON object")
-                continue
-            try:
                 payload = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-            except (TypeError, ValueError):
-                bridge_error("input is not a JSON object")
+            except (TypeError, UnicodeError, ValueError, json.JSONDecodeError):
+                if not bridge_error("input is not a JSON object"):
+                    return 0
                 continue
-            del request
-            del line
             try:
                 connection.sendall(struct.pack("=I", len(payload)) + payload)
-                del payload
-                reply = receive_reply(connection)
-            except (EOFError, OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
-                bridge_error("greetd closed or sent an invalid reply")
-                return 1
-            write_line(reply)
+                reply = receive_reply(connection, time.monotonic() + reply_timeout())
+            except StdinClosedError:
+                return 0
+            except TimeoutError:
+                return fail("greetd did not answer in time")
+            except (PeerClosedError, OSError, UnicodeError, ValueError, json.JSONDecodeError):
+                return fail("greetd closed or sent an invalid reply")
+            if not write_line(reply):
+                return 0
+
+
+def main():
+    try:
+        return run()
+    except BrokenPipeError:
+        return 0
+    except Exception as error:
+        try:
+            return fail(type(error).__name__)
+        except BrokenPipeError:
+            return 0
 
 
 if __name__ == "__main__":
