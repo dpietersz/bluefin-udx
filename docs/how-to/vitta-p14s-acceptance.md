@@ -2,29 +2,34 @@
 
 Run this live on the ThinkPad P14s Gen 5 with the owner. The switch is the
 owner's decision; nothing in this document runs by itself. Record a result for
-every numbered check. At any point, boot the previous GRUB deployment or run
-`sudo rpm-ostree rollback && systemctl reboot` to return to
-`bluefin-udx-nvidia:stable`.
+every numbered check. Immediately after the first Vitta boot, pin the Bluefin
+deployment. Until then, rollback reaches Bluefin only while it is still the
+previous deployment; the pin, its GRUB entry, or a signed Bluefin rebase gets
+back to `bluefin-udx-nvidia:stable` afterwards.
 
 ## Before the switch
 
-The target is the signed, anonymously pullable testing image published on
-2026-11-12:
+This PR must be merged. The `build` workflow on `main` for that merge must be
+green. The dotfiles `vitta-nvidia` branch, including
+`run_onchange_after_16a-keyring-passwordless-greetd`, must be merged to
+dotfiles `main` before switching.
+
+Record the testing image that will be tested. Substitute the recorded digest
+for `<digest>` in later checks.
 
 ```bash
 cd ~/dev/Projects/bluefin-udx
-skopeo inspect docker://ghcr.io/dpietersz/vitta-nvidia:testing
-cosign verify --key cosign.pub ghcr.io/dpietersz/vitta-nvidia:testing
+skopeo inspect --no-creds docker://ghcr.io/dpietersz/vitta-nvidia:testing --format "{{.Digest}} {{.Created}}"
+# Optional, when cosign is available:
+cosign verify --key cosign.pub ghcr.io/dpietersz/vitta-nvidia@<digest>
 ```
 
-Expected: the digest is
-`sha256:4657751d80ebfcb55d4a97a725736f4d37508a88a45db987051467df21fec85c`
-and cosign verification succeeds.
+Expected: the creation time is after the merge. The optional cosign check
+succeeds. `rpm-ostree` enforces this signature again through
+`ostree-image-signed:`.
 
-The dotfiles `vitta-nvidia` branch, including
-`run_onchange_after_16a-keyring-passwordless-greetd`, must be merged before
-switching. Save the current deployment facts and the passwordless keyring. Do
-not copy the keyring after the first greetd login.
+Save the current deployment facts and the passwordless keyring. Do not copy the
+keyring after the first graphical greetd login.
 
 ```bash
 mkdir -p ~/vitta-nvidia-acceptance
@@ -34,15 +39,16 @@ virsh -c qemu:///system dumpxml windows-work > ~/vitta-nvidia-acceptance/windows
 authselect current | tee ~/vitta-nvidia-acceptance/authselect.before
 fprintd-list "$USER" | tee ~/vitta-nvidia-acceptance/fprintd.before
 flatpak list | wc -l | tee ~/vitta-nvidia-acceptance/flatpak-count.before
+head -c 9 ~/.local/share/keyrings/login.keyring
 cp -p ~/.local/share/keyrings/login.keyring ~/vitta-nvidia-acceptance/login.keyring.before
-sha256sum ~/.local/share/keyrings/login.keyring | tee ~/vitta-nvidia-acceptance/login.keyring.before.sha256
 ls -l ~/.local/share/keyrings/login.keyring ~/vitta-nvidia-acceptance/login.keyring.before
 ```
 
 Expected: the current deployment is `bluefin-udx-nvidia:stable`; authselect
-includes `with-fingerprint`; the enrolled Synaptics finger is listed; and the
-keyring copy has the same size and timestamp as `login.keyring`. Today,
-`rpm-ostree status -v` prints:
+includes `with-fingerprint`; the enrolled Synaptics finger is listed; and
+`head` prints `[keyring]`. If it does not, stop: this runbook preserves a
+passwordless keyring only. The backup copy has the same size and timestamp as
+`login.keyring`. Today, `rpm-ostree status -v` prints:
 
 ```text
 InactiveRequests: fuse-libs
@@ -50,10 +56,8 @@ LocalPackages: equibop-3.3.2-1.x86_64
 ```
 
 Bluefin ships `fuse-libs`, so its request is inactive; Vitta does not, so the
-same request must become a layer. The login keyring must have an empty
-password: open it in Seahorse before switching if that is uncertain, and set
-its password to empty. Record the Flatpak count; Flatpak state is in `/var` and
-must survive the rebase.
+same request must become a layer. Record the Flatpak count; Flatpak state is in
+`/var` and must survive the rebase.
 
 ## 1. Stage the signed rebase
 
@@ -113,6 +117,34 @@ If the prompt is black or unusable, type the passphrase blind and press Enter,
 or press `Esc` for the text prompt. If that does not boot, select the previous
 deployment in GRUB.
 
+Before any greeter check or automatic update can replace the previous
+deployment, pin Bluefin. `rpm-ostree status` lists deployments in index order
+starting at `0`. With the booted Vitta deployment first and
+`bluefin-udx-nvidia:stable` second, Bluefin is index `1`; otherwise count the
+listed deployments to its index.
+
+```bash
+rpm-ostree status
+sudo ostree admin pin 1
+rpm-ostree status
+```
+
+Expected: the second status retains Bluefin as a pinned deployment. The pin
+survives future Vitta updates until it is explicitly unpinned. Automatic
+updates stage new `:testing` builds nightly. For the acceptance week, an
+optional pause keeps the tested image fixed until an explicit `rpm-ostree
+upgrade`:
+
+```bash
+sudo systemctl disable --now rpm-ostreed-automatic.timer
+```
+
+Re-enable the timer after acceptance if it was paused:
+
+```bash
+sudo systemctl enable --now rpm-ostreed-automatic.timer
+```
+
 At the greeter, confirm the bands and fields are edge to edge on the internal
 panel. Then repeat with the Thunderbolt dock connected and the lid closed; it
 must use one display rather than span a seam. Leave the greeter idle for five
@@ -124,18 +156,31 @@ journalctl -b -u greetd --no-pager
 cat /sys/bus/pci/devices/0000:01:00.0/power/runtime_status
 ```
 
-Expected: the helper prints `/dev/dri/card0`; the greetd journal has no error;
-and the NVIDIA device is `suspended` while idle.
+Expected: the helper prints a DRM path such as `/dev/dri/card0`; the card it
+prints belongs to the Intel GPU at PCI `0000:00:02.0`; the greetd journal has
+no error; and the NVIDIA device is `suspended` while idle. Check the selected
+card explicitly:
+
+```bash
+card=$(/usr/libexec/vitta/vitta-greeter-gpu)
+readlink -f "/sys/class/drm/${card##*/}/device"
+```
+
+Expected: the path ends in `0000:00:02.0`.
 
 After this first successful boot, record the `Digest:` line for the booted
-(`●`) deployment. It is the tested source for promotion.
+(`●`) deployment. It must equal the digest recorded before the rebase. It is
+the tested source for promotion. Also prove this image includes the PR.
 
 ```bash
 rpm-ostree status | tee ~/vitta-nvidia-acceptance/rpm-ostree-status.first-vitta-boot
+rpm -q fprintd-pam
+grep -E '^-?auth[[:space:]].*system-auth' /etc/pam.d/greetd
 ```
 
-Expected: the saved status has the booted Vitta deployment and its
-`Digest: sha256:…` line.
+Expected: the saved status has the booted Vitta deployment and its recorded
+`Digest: sha256:…` line; `fprintd-pam` is installed; and the final command
+prints nothing.
 
 > **Result:** [ ] Pass  [ ] Fail
 >
@@ -143,54 +188,72 @@ Expected: the saved status has the booted Vitta deployment and its
 
 ## 3. Login, lock, sudo, and keyring
 
-Follow these steps in order. Do not restore the keyring before step 3 verifies
-the guard.
+Follow these steps in order. The text console login does not touch the
+keyring. Do this before the first graphical login.
 
-1. Before the switch, while still on Bluefin, copy
-   `~/.local/share/keyrings/login.keyring` to the named backup path
-   `~/vitta-nvidia-acceptance/login.keyring.before` and record `sha256sum`.
-   The capture block above does both.
-2. At the Vitta greeter, enter one wrong password. It must fail in about 2–3
-   seconds, with no fingerprint prompt or fingerprint timeout. Then log in
-   with the account password.
-3. In this first session, deploy and verify the guard before returning to
-   greetd:
+1. At the Vitta greeter, press `Ctrl+Alt+F3` and log in on the text console.
+   Comment out precisely the three keyring PAM lines:
+
+   ```bash
+   sudo sed -i -E 's@^([[:space:]]*-?(auth|password|session)[[:space:]].*pam_gnome_keyring\.so.*)$@# [keyring-pam disabled] \1@' /etc/pam.d/greetd
+   grep -n pam_gnome_keyring /etc/pam.d/greetd
+   grep -E "^auth" /etc/pam.d/greetd
+   ```
+
+   Expected: the first `grep` prints three lines with
+   `# [keyring-pam disabled]` immediately after the line number. The second still lists `pam_unix.so`,
+   `pam_deny.so`, and `pam_permit.so`. Run `exit`, return to the login screen
+   with `Ctrl+Alt+F1` (`greetd` uses `vt = 1`), enter one wrong password, then
+   log in with the account password. The wrong password must fail in about 2–3
+   seconds with no fingerprint prompt or timeout.
+2. In the first graphical session, deploy the guard. From then on it owns
+   `/etc/pam.d/greetd`: it keeps those three lines commented and rebuilds the
+   file from `/usr/etc/pam.d/greetd` when an image changes it.
 
    ```bash
    cd ~/dotfiles
    git pull --ff-only
    chezmoi init
    chezmoi apply
-   chezmoi data | grep -E 'isVitta|isMyImage|expectedImageFamily'
+   chezmoi data --format json | jq '{isVitta, isMyImage, expectedImageFamily}'
    grep -n pam_gnome_keyring /etc/pam.d/greetd
    ```
 
-   Expected: Chezmoi reports `isVitta = true`, `isMyImage = true`, and
-   `expectedImageFamily = vitta-nvidia`. `grep` shows three
-   `pam_gnome_keyring` lines, all commented with `# [keyring-pam disabled]`.
-4. Compare the current keyring with the recorded hash:
+   Expected:
 
-   ```bash
-   sha256sum ~/.local/share/keyrings/login.keyring
-   cat ~/vitta-nvidia-acceptance/login.keyring.before.sha256
+   ```json
+   {
+     "isVitta": true,
+     "isMyImage": true,
+     "expectedImageFamily": "vitta-nvidia"
+   }
    ```
 
-   Expected: the two hashes match. The keyring was not touched; continue with
-   check 4.
-5. If the hashes differ, the first login re-encrypted the keyring. Log out,
-   press `Ctrl+Alt+F3`, and log in on the text console. Keep the re-encrypted
-   file, stop any of your keyring daemons, then restore the backup:
+   The final command prints three lines with `# [keyring-pam disabled]`
+   immediately after the line number.
+3. After this graphical login, and again after a reboot, verify the keyring:
 
    ```bash
-   mv ~/.local/share/keyrings/login.keyring ~/.local/share/keyrings/login.keyring.reencrypted
+   head -c 9 ~/.local/share/keyrings/login.keyring
+   ```
+
+   Expected: `[keyring]`, with no keyring unlock prompt.
+4. Only if the command prints `GnomeKeyr`, a graphical login happened before
+   the lines were commented and re-encrypted the keyring. Confirm the three
+   lines are commented, log out, and use `Ctrl+Alt+F3` to log in on the text
+   console. If a daemon runs, stop it; then preserve the encrypted file and
+   restore the backup:
+
+   ```bash
    pkill -u "$USER" gnome-keyring-daemon
+   mv ~/.local/share/keyrings/login.keyring ~/.local/share/keyrings/login.keyring.reencrypted
    cp -p ~/vitta-nvidia-acceptance/login.keyring.before ~/.local/share/keyrings/login.keyring
    exit
    ```
 
-   Return to greetd with `Ctrl+Alt+F1`; its `/etc/greetd/config.toml` sets
-   `vt = 1`. Log in again. The verified guard is active, so this login cannot
-   re-encrypt the keyring. Re-check the hash from step 4.
+   Return to greetd with `Ctrl+Alt+F1` and log in. Secrets saved since the
+   backup remain in `login.keyring.reencrypted`, which opens with the login
+   password.
 
 > **Result:** [ ] Pass  [ ] Fail
 >
@@ -311,26 +374,54 @@ this symptom is the known follow-up. Keep Fedora's package unless it happens.
 
 ## 9. Rollback and promotion
 
-Rollback ends the trial and returns to the maintained fallback:
+Use these paths back to Bluefin in this order.
+
+1. While Bluefin is still the previous deployment—no update has been applied
+   since the switch—rollback returns to it:
+
+   ```bash
+   sudo rpm-ostree rollback
+   systemctl reboot
+   ```
+
+   Expected: `bluefin-udx-nvidia:stable` boots. Once a Vitta update has
+   replaced the previous deployment, this instead returns to an older Vitta.
+2. The pinned Bluefin GRUB entry works after later Vitta updates. Immediately
+   after the firmware logo, hold Shift or press Esc repeatedly to show the
+   hidden GRUB menu. Select the pinned `bluefin-udx-nvidia:stable` entry. It
+   stays available until it is unpinned.
+3. A signed rebase always works:
+
+   ```bash
+   sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/dpietersz/bluefin-udx-nvidia:stable
+   systemctl reboot
+   ```
+
+   Expected: the staged Bluefin deployment boots after the reboot.
+
+Each deployment keeps the `/etc` it last ran with. Bluefin has no
+`/etc/pam.d/greetd`; passwords, Wi-Fi settings, and libvirt XML changed on
+Vitta are not visible after returning through GRUB or rollback. After logging
+in to Bluefin, restore its user configuration:
 
 ```bash
-sudo rpm-ostree rollback
-systemctl reboot
-# After logging in to bluefin-udx-nvidia:
 rpm-ostree status
 chezmoi init && chezmoi apply
 ```
 
-Expected: the previous `bluefin-udx-nvidia:stable` deployment boots and
-`rpm-ostree status` shows it as booted. After `chezmoi init`,
-`expectedImageFamily` is `bluefin-udx-nvidia` and `isVitta` is `false`. The
-Vitta `/etc/pam.d/greetd` keyring guard stays behind as an unused file on
-Bluefin; it is harmless. Selecting the previous deployment in GRUB is
-equivalent when the current boot cannot reach a terminal.
+Expected: `rpm-ostree status` shows Bluefin as booted. After `chezmoi init`,
+`expectedImageFamily` is `bluefin-udx-nvidia` and `isVitta` is `false`.
 
-Nightly CI moves `:testing`. An `rpm-ostree upgrade` during the acceptance week
-changes what is being tested, so record the booted deployment's `Digest:` line
-again after every upgrade. The workflow accepts `testing`, a `YYYYMMDD` tag, a
+After acceptance, remove the fallback pin. Find its current index with
+`rpm-ostree status`; do not assume it is still `1`.
+
+```bash
+sudo ostree admin pin --unpin <index>
+```
+
+Nightly CI moves `:testing`, and automatic updates stage those builds. If the
+timer was left enabled, record the booted deployment's `Digest:` line after
+every update. The workflow accepts `testing`, a `YYYYMMDD` tag, a
 seven-character SHA tag, or `sha256:<64 hex>`; promote the recorded digest,
 never `testing`:
 
