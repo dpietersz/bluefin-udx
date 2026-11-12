@@ -159,21 +159,23 @@ Selection rule: fewer than two `card[0-9]+` entries → nothing. Else the card o
 **Interfaces:**
 - Produces: PAM service `greetd` whose auth section is exactly, in this order:
   ```
-  auth  required  pam_env.so
-  auth  required  pam_faildelay.so delay=2000000
-  auth  required  pam_unix.so nullok
-  -auth optional  pam_gnome_keyring.so
+  auth  required                    pam_env.so
+  auth  required                    pam_faildelay.so delay=2000000
+  auth  [success=1 default=ignore]  pam_unix.so nullok
+  auth  requisite                   pam_deny.so
+  auth  required                    pam_permit.so
+  -auth optional                    pam_gnome_keyring.so
   -auth optional  pam_kwallet5.so
   -auth optional  pam_kwallet.so
   auth  include   postlogin
   ```
-  Account, password and session sections stay as they are. No `system-auth` and no `pam_fprintd` on any `auth` line: on the P14s authselect's `with-fingerprint` puts `pam_fprintd` first in `system-auth`, and under greetd's single PAM conversation that would hold a typed password for the whole fingerprint timeout. `pam_unix` is `required`, so success does not depend on the optional keyring modules.
+  Account, password and session sections stay as they are. No `system-auth` and no `pam_fprintd` on any `auth` line: on the P14s authselect's `with-fingerprint` puts `pam_fprintd` first in `system-auth`, and under greetd's single PAM conversation that would hold a typed password for the whole fingerprint timeout. Ruling R48: the stock-shaped jump form (`pam_unix` success skips `pam_deny` and lands on `pam_permit`) keeps every failure at the same result code as Fedora's stock stack (an unknown user must not look different from a wrong password), and success does not depend on the optional keyring modules.
 - Produces: `fprintd` and `fprintd-pam` in the image, for hyprlock's fingerprint unlock and for sudo/polkit through the machine's own authselect profile. Inert without a reader.
 - Produces: `python3 /smoke/pam_probe.py SERVICE USER PASSWORD --expect success|fail --max-seconds N [--expect-message TEXT] [--forbid-message TEXT]` (ctypes on `libpam.so.0`, answers every prompt with PASSWORD, prints each PAM message, never the password; hard stop at N plus a small grace; a conversation callback error is a failure; exit 0 only when result, duration and message conditions all hold).
 
 The probe, its unit tests and the gate block exist on the archived local branch `vitta-nvidia-login` (commit 8e4ced0, reviewed there); take them from that branch and cut them down to this task: no marker, no `pam_exec` helper, no `pam_echo`.
 
-- [ ] **Step 1: Failing tests** in `tests/test_vitta_overlay.py`: `test_greetd_auth_is_password_only` (the seven auth lines in order; no `system-auth`, `pam_fprintd`, `pam_exec` or `pam_echo` on any `auth` line; `pam_unix.so` is `required`); `test_greetd_other_sections_unchanged` (the account, password and session lines equal a list written out in the test, copied from today's file); In `tests/test_vitta_nvidia.py`: `test_fprintd_is_shared` (`fprintd`, `fprintd-pam` in `vitta-modules.yml`, not in `vitta-nvidia.yml`); `test_gates_probe_greetd_auth` (both gates mount `/smoke` without a GitHub expression and run the four probes below).
+- [ ] **Step 1: Failing tests** in `tests/test_vitta_overlay.py`: `test_greetd_auth_is_password_only` (the nine auth lines in order; no `system-auth`, `pam_fprintd`, `pam_exec` or `pam_echo` on any `auth` line; the `pam_unix` jump lands on `required pam_permit.so` right after `requisite pam_deny.so`); `test_greetd_other_sections_unchanged` (the account, password and session lines equal a list written out in the test, copied from today's file); In `tests/test_vitta_nvidia.py`: `test_fprintd_is_shared` (`fprintd`, `fprintd-pam` in `vitta-modules.yml`, not in `vitta-nvidia.yml`); `test_gates_probe_greetd_auth` (both gates mount `/smoke` without a GitHub expression and run the four probes below).
 - [ ] **Step 2:** Run → FAIL.
 - [ ] **Step 3:** Implement PAM file (comment block: why self-contained, the owner decision, that fingerprint lives at the lock screen and sudo), packages, probe + its unit tests.
 - [ ] **Step 4:** Gate (`IS_VITTA`), each probe under `timeout -k 5 25`: `check_rpm fprintd fprintd-pam`; create `vittaprobe` with a known password; correct → `success` within 5 s; wrong → `fail` within 10 s; empty → `fail` within 10 s; a copy of the service with every keyring/kwallet auth line removed, correct password → `success`. Prove the same four in a throwaway `ghcr.io/dpietersz/vitta:stable` container first, plus one more there: with `pam_permit.so` copied in as `pam_fprintd.so`, a wrong password still fails (nothing in the stack can reach a fingerprint module).
