@@ -53,7 +53,8 @@ echo "==> Smoke-boot test against $IMAGE (via $RUNNER)"
 #    /usr/lib/opt). Inside a `run` container /var/opt is empty so the
 #    /usr/bin/teams-for-linux symlink chain dead-ends. Verify the rpm is
 #    installed AND the wrapped binary lives at its real /usr/lib/opt path.
-$RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
+# tests/smoke (pam_probe.py) is mounted read-only for greetd PAM checks; ,z relabels it for SELinux hosts.
+$RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" -v "$REPO_ROOT/tests/smoke:/smoke:ro,z" --entrypoint /bin/bash "$IMAGE" -c '
     set -e
     FAIL=0
     check_bin() {
@@ -348,6 +349,37 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" --entrypoint /bin/bash "$IMAGE" -c '
             echo "  ok    rebase simulation: vitta-shadow-sync gives greetd a locked shadow entry (pam_unix account $VITTA_CHK_BEFORE -> 0)"
         else
             echo "  FAIL  greetd in /usr/lib/passwd without shadow entry: pam_unix account before=$VITTA_CHK_BEFORE sync=$VITTA_SYNC_RC after=$VITTA_CHK_AFTER shadow=${VITTA_GREETD_SHADOW:-none}"; FAIL=1
+        fi
+        echo "Vitta greetd auth (password-only):"
+        check_rpm fprintd
+        check_rpm fprintd-pam
+        check_file /usr/lib64/security/pam_fprintd.so
+        VITTA_PROBE_PW="Correct-Horse-9"
+        if useradd -M vittaprobe >/dev/null 2>&1 && printf "%s\n" "vittaprobe:$VITTA_PROBE_PW" | chpasswd >/dev/null 2>&1; then
+            echo "  ok    probe user vittaprobe created"
+            if VITTA_PROBE_OUT=$(timeout -k 5 25 python3 /smoke/pam_probe.py greetd vittaprobe "$VITTA_PROBE_PW" --expect success --max-seconds 5 2>&1); then
+                echo "  ok    greetd PAM: correct password succeeds within 5 s"
+            else
+                echo "  FAIL  greetd PAM correct password:"; printf "%s\n" "$VITTA_PROBE_OUT" | sed "s/^/          /"; FAIL=1
+            fi
+            if VITTA_PROBE_OUT=$(timeout -k 5 25 python3 /smoke/pam_probe.py greetd vittaprobe "wrong-$VITTA_PROBE_PW" --expect fail --max-seconds 10 2>&1); then
+                echo "  ok    greetd PAM: wrong password fails within 10 s"
+            else
+                echo "  FAIL  greetd PAM wrong password:"; printf "%s\n" "$VITTA_PROBE_OUT" | sed "s/^/          /"; FAIL=1
+            fi
+            if VITTA_PROBE_OUT=$(timeout -k 5 25 python3 /smoke/pam_probe.py greetd vittaprobe "" --expect fail --max-seconds 10 2>&1); then
+                echo "  ok    greetd PAM: empty password fails within 10 s"
+            else
+                echo "  FAIL  greetd PAM empty password:"; printf "%s\n" "$VITTA_PROBE_OUT" | sed "s/^/          /"; FAIL=1
+            fi
+            VITTA_PROBE_OUT="could not write /etc/pam.d/vittaprobe-nokeyring"
+            if grep -Ev "^-?auth[[:space:]].*(pam_gnome_keyring|pam_kwallet)" /etc/pam.d/greetd > /etc/pam.d/vittaprobe-nokeyring && VITTA_PROBE_OUT=$(timeout -k 5 25 python3 /smoke/pam_probe.py vittaprobe-nokeyring vittaprobe "$VITTA_PROBE_PW" --expect success --max-seconds 5 2>&1); then
+                echo "  ok    greetd PAM without keyring/kwallet auth lines: correct password succeeds"
+            else
+                echo "  FAIL  greetd PAM success depends on optional keyring/kwallet modules:"; printf "%s\n" "$VITTA_PROBE_OUT" | sed "s/^/          /"; FAIL=1
+            fi
+        else
+            echo "  FAIL  could not create probe user vittaprobe (useradd/chpasswd)"; FAIL=1
         fi
         # Boot splash (R23): Plymouth theme vitta, default via plymouthd.defaults (wins on rebased
         # machines: /usr comes from the image, /etc keeps its 3-way merge), and baked into the

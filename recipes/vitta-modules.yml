@@ -91,6 +91,10 @@ modules:
       - greetd
       - cage
       - quickshell
+      # Fingerprint services for hyprlock and sudo/polkit through each
+      # machine's authselect profile; greetd itself remains password-only.
+      - fprintd
+      - fprintd-pam
       # Boot splash: the Vitta Plymouth theme (files/vitta/usr/share/plymouth/
       # themes/vitta) is a script-plugin theme; base-main ships only two-step.
       - plymouth-plugin-script
