@@ -5,6 +5,7 @@
 # Do not include system-auth or a fingerprint module here. pam_unix success jumps
 # over requisite pam_deny to required pam_permit; pam_env/pam_faildelay ignore, so
 # pam_permit records success while every failure ends at pam_deny.
+# Dotfiles' keyring guard matches the pam_unix/pam_deny/pam_permit auth lines and three pam_gnome_keyring.so lines; keep their shapes.
 auth       required                    pam_env.so
 auth       required                    pam_faildelay.so delay=2000000
 auth       [success=1 default=ignore]  pam_unix.so nullok

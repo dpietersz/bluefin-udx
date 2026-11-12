@@ -54,6 +54,7 @@ The nightly workflow pre-resolves both Proton products' current stable URL and c
 
 **RPM Fusion Free (package-scoped):**
 - [ ] `telegram-desktop` — compare the Fedora package in the base and updates repositories with https://github.com/telegramdesktop/tdesktop/releases/latest. Confirm `files/system/etc/yum.repos.d/rpmfusion-free-telegram.repo` still limits both sections to `includepkgs=telegram-desktop*`, package vendor remains `RPM Fusion`, and baked key fingerprint remains `E9A4 91A3 DE24 7814 E7E0 67EA E06F 8ECD D651 FF2E`. A modest packaging delay is acceptable; investigate prolonged lag or a missing package for the current Fedora release.
+- [ ] On `vitta-nvidia`, re-check that the akmods NVIDIA install (`nvidia-install.sh`) leaves `rpmfusion*` repository definitions disabled, including the baked Telegram repository. Packages from them are installed before that step, so only later client-side layering from those repositories is affected; revisit this when Telegram's source changes.
 
 ### 4. Upstream movement
 - [ ] Has Zen Browser stabilized enough to ship an official RPM? If yes, drop `sneexy/`.
