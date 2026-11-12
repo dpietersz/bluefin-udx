@@ -60,10 +60,10 @@ The nightly workflow pre-resolves both Proton products' current stable URL and c
 - [ ] Has Helium graduated out of Terra into its own vendor repo?
 - [ ] Has Polypane started shipping an RPM? If yes, drop the AppImage-extract pattern.
 
-### 5. CUDA workflow sanity (NVIDIA variant)
-The bluefin-udx-nvidia image **does not bake `cuda-toolkit`** (Bluefin's atomic FS redirects `/usr/local` → `/var/usrlocal` which is stripped on image commit; CUDA RPMs install to /usr/local/cuda-XX.Y, so files are physically gone after commit).
+### 5. CUDA workflow sanity (NVIDIA variants)
+Neither `bluefin-udx-nvidia` nor `vitta-nvidia` bakes `cuda-toolkit` (Bluefin's atomic FS redirects `/usr/local` → `/var/usrlocal` which is stripped on image commit; CUDA RPMs install to /usr/local/cuda-XX.Y, so files are physically gone after commit).
 
-The base bluefin-dx-nvidia-open image already provides everything to **run** CUDA workloads: driver, `libcuda.so`, `nvidia-container-toolkit`, `nvidia-smi`, `nvidia-ctk`. For development with `nvcc`/headers, use containers per project:
+Bluefin's `bluefin-dx-nvidia-open` base and Vitta's `base-main` plus BlueBuild `akmods` NVIDIA module provide what is needed to **run** CUDA workloads: driver, `libcuda.so`, `nvidia-container-toolkit`, `nvidia-smi`, and `nvidia-ctk`. For development with `nvcc`/headers, use containers per project:
 
 ```bash
 podman run --rm -it --device nvidia.com/gpu=all -v $PWD:/work -w /work \
@@ -125,7 +125,8 @@ Vitta `:stable` is an owner-promoted release. The Vitta/base-main checks below r
 **Vitta / `base-main` health (quarterly after promotion; useful while testing):**
 - [ ] Check `ghcr.io/ublue-os/base-main:44` freshness and its Fedora-major cadence with `skopeo inspect --no-tags docker://ghcr.io/ublue-os/base-main:44`; keep Vitta pinned to an intentional major and run the Vitta leg of `scripts/check-fedora-next.sh` before changing it.
 - [ ] Check that `ghcr.io/ublue-os/akmods-nvidia-open:main-44` has a build for the current `base-main` kernel and record the NVIDIA driver branch it ships before rebuilding or promoting `vitta-nvidia`; investigate an unexpected driver-branch change with the Vitta-NVIDIA smoke gate before the owner switches the P14s.
-- [ ] On Vitta, record `rpm -q greetd cage quickshell` and run the image smoke gate or `vitta-greeter-preview --selftest`; investigate Fedora updates that change the login-stack versions or break the headless greeter check.
+- [ ] On Vitta, record `rpm -q greetd cage quickshell fprintd fprintd-pam` and run the image smoke gate or `vitta-greeter-preview --selftest`; investigate Fedora updates that change the password-only greetd stack, `tests/smoke/pam_probe.py` result, or headless greeter check. Retain `fprintd` for hyprlock and sudo/polkit, not greeter authentication.
+- [ ] On Vitta NVIDIA, verify `DeviceScale=1` remains in `/usr/share/plymouth/plymouthd.defaults`, `vitta-greeter-gpu` selects the panel-owning card, and the NVIDIA akmods module still supplies `/usr/lib/bootc/kargs.d/00-bluebuild-nvidia-kargs.toml`.
 - [ ] Verify the baked VS Code signing key still hashes to `2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6` (`sha256sum /etc/pki/rpm-gpg/microsoft.asc`) and that `files/vitta/etc/yum.repos.d/vscode.repo` still resolves `code` with GPG checking enabled.
 - [ ] Verify the Docker CE and Tailscale Fedora repositories still return signed metadata and resolve their Vitta package sets; do not replace their package-managed keys or repositories with unpinned downloads.
 

@@ -135,7 +135,7 @@ rpm-ostree status
 sudo rpm-ostree rollback
 ```
 
-Validation is the regression tests plus the build gate and smoke-boot. Run focused tests in `tests/` when changing their owner; `tests/test_vitta_groups.sh` covers the every-wheel-user reconciliation. The `local-build-test.sh` checks must stay in sync with `recipes/common.yml` and `recipes/vitta-modules.yml` — when you add a package, add the corresponding `check_rpm` / `check_bin` line in the applicable smoke gate. Both gates derive `IS_VITTA` for `vitta|vitta-nvidia` and `IS_NVIDIA` for `bluefin-udx-nvidia|vitta-nvidia`; put shared Vitta, NVIDIA, and Vitta-NVIDIA checks behind the appropriate flags.
+Validation is the regression tests plus the build gate and smoke-boot. Run focused tests in `tests/` when changing their owner; `tests/test_vitta_groups.sh` covers the every-wheel-user reconciliation. The `local-build-test.sh` checks must stay in sync with `recipes/common.yml` and `recipes/vitta-modules.yml` — when you add a package, add the corresponding `check_rpm` / `check_bin` line in the applicable smoke gate. Both gates derive `IS_VITTA` for `vitta|vitta-nvidia` and `IS_NVIDIA` for `bluefin-udx-nvidia|vitta-nvidia`; put shared Vitta, NVIDIA, and Vitta-NVIDIA checks behind the appropriate flags. `tests/smoke/pam_probe.py` exercises the password-only greetd stack in both gates; it owns authentication rather than including `system-auth`, because authselect's `pam_fprintd` would delay a typed password. `fprintd` and `fprintd-pam` remain baked for hyprlock and sudo/polkit through the host authselect profile. Vitta's Plymouth defaults pin `DeviceScale=1`, and `vitta-greeter-gpu` pins cage to the panel-owning DRM card when multi-GPU sysfs identifies one.
 
 ## When making changes
 
