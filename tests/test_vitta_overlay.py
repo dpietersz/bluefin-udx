@@ -153,17 +153,26 @@ class VittaOverlayTests(unittest.TestCase):
         self.assertEqual(
             auth_lines,
             [
-                "auth       required    pam_env.so",
-                "auth       required    pam_faildelay.so delay=2000000",
-                "auth       required    pam_unix.so nullok",
-                "-auth      optional    pam_gnome_keyring.so",
-                "-auth      optional    pam_kwallet5.so",
-                "-auth      optional    pam_kwallet.so",
-                "auth       include     postlogin",
+                "auth       required                    pam_env.so",
+                "auth       required                    pam_faildelay.so delay=2000000",
+                "auth       [success=1 default=ignore]  pam_unix.so nullok",
+                "auth       requisite                   pam_deny.so",
+                "auth       required                    pam_permit.so",
+                "-auth      optional                    pam_gnome_keyring.so",
+                "-auth      optional                    pam_kwallet5.so",
+                "-auth      optional                    pam_kwallet.so",
+                "auth       include                     postlogin",
             ],
         )
-        self.assertNotRegex(pam, r"(?m)^-?auth\s+.*\b(?:system-auth|pam_fprintd|pam_exec|pam_echo)\b")
-        self.assertRegex(pam, r"(?m)^auth\s+required\s+pam_unix\.so\s+nullok$")
+        self.assertNotRegex(
+            "\n".join(auth_lines),
+            r"\b(?:system-auth|pam_fprintd|pam_exec|pam_echo)\b",
+        )
+        pam_unix_index = next(index for index, line in enumerate(auth_lines) if "pam_unix.so" in line)
+        jump = int(re.search(r"\[success=(\d+) default=ignore\]", auth_lines[pam_unix_index]).group(1))
+        landed_index = pam_unix_index + jump + 1
+        self.assertEqual(auth_lines[landed_index - 1], "auth       requisite                   pam_deny.so")
+        self.assertEqual(auth_lines[landed_index], "auth       required                    pam_permit.so")
 
     def test_greetd_other_sections_unchanged(self):
         pam = (VITTA / "etc/pam.d/greetd").read_text()
