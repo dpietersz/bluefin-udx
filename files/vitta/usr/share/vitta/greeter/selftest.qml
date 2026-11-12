@@ -1,12 +1,16 @@
 import QtQuick
 import QtTest
 import Quickshell
+import Quickshell.Io
 
 // Noninteractive behaviour test for the greeter: the real Theme, Auth and
 // LoginScreen wired as in shell.qml, driven against the preview backend with a
 // scripted submit. Run it via `vitta-greeter-preview --selftest`, which sets
 // VITTA_GREETER_PREVIEW=1, the scenario and an offscreen platform, and turns
 // the printed "SELFTEST RESULT" line into the exit status.
+// With VITTA_GREETER_SELFTEST_BRIDGE=bridge-<name> (and no preview) it drives
+// the real GreetdBridge.qml + vitta-greetd-bridge against fake_greetd.py on
+// GREETD_SOCK instead; the preview script also checks the fake's request log.
 ShellRoot {
     id: root
 
@@ -24,6 +28,17 @@ ShellRoot {
     // with the launcher's flags: only the edge-to-edge checks, no scenario.
     readonly property bool cageCheck: String(Quickshell.env("VITTA_GREETER_SELFTEST_CAGE") || "") === "1"
     property var pending: null   // { cond, what, next, deadline }
+
+    // Bridge group (see the header). Its right password is fake_greetd.py's.
+    readonly property string bridgeScenario: String(Quickshell.env("VITTA_GREETER_SELFTEST_BRIDGE") || "")
+    readonly property string scenarioName: bridgeScenario !== "" ? bridgeScenario : auth.scenario
+    readonly property string rightPassword: "right"
+    readonly property string wrongPassword: "wrong"
+    property int failedCount: 0
+    property var notices: []
+    property int launchCount: 0
+    // bridge-died: set once the preview script has restarted fake greetd.
+    property bool greetdBack: false
 
     Theme { id: theme }
     Auth { id: auth }
@@ -50,12 +65,42 @@ ShellRoot {
     readonly property var login: card.loginField
     readonly property var pass: card.passwordField
 
+    Connections {
+        target: auth
+        function onFailed(text) { root.failedCount++; }
+        function onNotice(text, isError) { root.notices = root.notices.concat([{ text: text, isError: isError }]); }
+    }
+
+    Connections {
+        target: auth.backend
+        function onLaunched() {
+            root.launchCount++;
+            // bridge-ok runs without VITTA_GREETER_SELFTEST_NO_QUIT: the bridge
+            // quits the greeter right after this signal, so judge now.
+            if (root.scenarioName === "bridge-ok") root.bridgeOkLaunched();
+        }
+    }
+
+    // bridge-died: is the marker file there yet?
+    Process {
+        id: markerCheck
+        command: ["test", "-e", String(Quickshell.env("VITTA_GREETER_SELFTEST_MARKER") || "/nonexistent")]
+        onExited: (code, status) => { if (code === 0) root.greetdBack = true; }
+    }
+
+    Timer {
+        interval: 50
+        repeat: true
+        running: root.bridgeScenario === "bridge-died" && !root.greetdBack
+        onTriggered: if (!markerCheck.running) markerCheck.running = true
+    }
+
     function check(ok, what) {
         if (ok) {
-            console.info("SELFTEST ok   " + auth.scenario + ": " + what);
+            console.info("SELFTEST ok   " + scenarioName + ": " + what);
         } else {
             failures++;
-            console.warn("SELFTEST FAIL " + auth.scenario + ": " + what
+            console.warn("SELFTEST FAIL " + scenarioName + ": " + what
                          + " [status=" + JSON.stringify(card.status) + " statusError=" + card.statusError
                          + " pass=" + JSON.stringify(pass.text) + " passFocus=" + pass.input.activeFocus
                          + " login=" + JSON.stringify(login.text) + " busy=" + auth.busy
@@ -63,9 +108,13 @@ ShellRoot {
         }
     }
 
-    function finish() {
-        console.info("SELFTEST RESULT " + (failures === 0 ? "PASS" : "FAIL") + " " + auth.scenario
+    function report() {
+        console.info("SELFTEST RESULT " + (failures === 0 ? "PASS" : "FAIL") + " " + scenarioName
                      + " (" + failures + " failed)");
+    }
+
+    function finish() {
+        report();
         Qt.quit();
     }
 
@@ -331,11 +380,159 @@ ShellRoot {
         }
     }
 
+    // ---- bridge group ---------------------------------------------------------
+    function submitWith(password) {
+        pass.text = password;
+        card.submitPassword();
+    }
+
+    function errorNotices() {
+        return notices.filter(n => n.isError);
+    }
+
+    // A login that ended in niri-session being started through greetd (the
+    // fake's log, checked by the preview script, holds the exact request).
+    function expectBridgeLaunch(failuresBefore) {
+        check(launchCount === 1, "launched exactly once");
+        check(card.status === "starting niri-session…" && !card.statusError, "status: starting niri-session…");
+        check(login.text === auth.lastUser, "user name shown");
+        check(failedCount === failuresBefore, "no further failure shown");
+        check(errorNotices().length === 0, "no error message shown");
+    }
+
+    // The bridge has failed the attempt: red message, fields usable again.
+    function expectBridgeFailure(message) {
+        check(card.status === message, "status is " + JSON.stringify(message));
+        check(isRed(), "status is red (theme.error)");
+        check(failedCount === 1, "exactly one failure shown");
+        check(pass.text === "", "password cleared");
+        check(pass.input.activeFocus, "password field focused");
+        check(login.text === auth.lastUser, "user name kept");
+        check(launchCount === 0, "nothing launched");
+    }
+
+    function bridgeOkLaunched() {
+        expectBridgeLaunch(0);
+        report();
+        // Output after the verdict fails the run in the preview script.
+        quitGuard.start();
+    }
+
+    Timer {
+        id: quitGuard
+        interval: 5000
+        onTriggered: {
+            root.check(false, "the greeter quits after start_session succeeded");
+            root.finish();
+        }
+    }
+
+    function runBridgeOk() {
+        submitWith(rightPassword);
+        check(auth.busy, "submit starts an attempt");
+        // The verdict is printed from onLaunched; this only catches a hang.
+        waitFor(() => false, "launch", () => {});
+    }
+
+    // Wrong password, then the right one: the reply to the greeter's own
+    // cancel_session must neither show nor shift later replies.
+    function runBridgeBadpass() {
+        submitWith(wrongPassword);
+        check(auth.busy, "submit starts an attempt");
+        waitFor(() => !auth.busy, "the failed attempt to end", () => {
+            expectBridgeFailure("Authentication failed");
+            submitWith(rightPassword);
+            check(auth.busy, "the retry starts an attempt");
+            waitFor(() => launchCount > 0, "launch after the retry", () => {
+                expectBridgeLaunch(1);
+                finish();
+            });
+        });
+    }
+
+    function runBridgeInfo() {
+        submitWith(rightPassword);
+        waitFor(() => launchCount > 0, "launch", () => {
+            check(notices.length === 1 && notices[0].text === "Welcome" && !notices[0].isError,
+                  "info message shown, not red (got " + JSON.stringify(notices) + ")");
+            expectBridgeLaunch(0);
+            finish();
+        });
+    }
+
+    function runBridgeMultiprompt() {
+        submitWith(rightPassword);
+        waitFor(() => auth.awaiting === "echo", "the echo prompt", () => {
+            check(card.status === "Login:" && !card.statusError, "echo prompt shown, not red");
+            check(card.answeringEcho && login.label === "answer:", "user field relabelled answer:");
+            check(login.input.activeFocus, "answer field focused");
+            card.cancel();
+            check(!auth.busy && auth.awaiting === "", "Escape resets the attempt");
+            check(login.text === auth.lastUser && login.label === "login:", "user name restored");
+            check(pass.text === "" && pass.input.activeFocus, "password cleared and focused");
+            check(card.status === "", "status cleared");
+            submitWith(rightPassword);
+            waitFor(() => auth.awaiting === "echo", "the echo prompt again", () => {
+                login.text = code;
+                card.submitUser();
+                waitFor(() => launchCount > 0, "launch", () => {
+                    expectBridgeLaunch(0);
+                    finish();
+                });
+            });
+        });
+    }
+
+    // greetd closes the connection mid-login: error shown, not busy; once
+    // greetd is back a new attempt (with a fresh helper) logs in.
+    function runBridgeDied() {
+        submitWith(rightPassword);
+        waitFor(() => !auth.busy, "the broken attempt to end", () => {
+            expectBridgeFailure("greetd closed or sent an invalid reply");
+            waitFor(() => greetdBack, "fake greetd to come back", () => {
+                submitWith(rightPassword);
+                check(auth.busy, "the new attempt starts");
+                waitFor(() => launchCount > 0, "launch after greetd came back", () => {
+                    expectBridgeLaunch(1);
+                    finish();
+                });
+            });
+        });
+    }
+
+    function startBridgeScenario() {
+        check(auth.available, "greetd available (GREETD_SOCK set)");
+        check(String(auth.backend.helperPath || "").endsWith("/vitta-greetd-bridge"),
+              "backend is GreetdBridge driving vitta-greetd-bridge");
+        check(auth.lastUser !== "" && login.text === auth.lastUser, "last user prefilled");
+        check(pass.input.activeFocus, "password field focused at start");
+        switch (bridgeScenario) {
+        case "bridge-ok": runBridgeOk(); break;
+        case "bridge-badpass":
+        case "bridge-split": runBridgeBadpass(); break;
+        case "bridge-info": runBridgeInfo(); break;
+        case "bridge-multiprompt": runBridgeMultiprompt(); break;
+        case "bridge-died": runBridgeDied(); break;
+        default:
+            check(false, "unknown bridge scenario");
+            finish();
+        }
+    }
+
     Timer {
         // Let LoginScreen.onCompleted prefill and focus first.
         interval: 300
         running: true
         onTriggered: {
+            if (root.bridgeScenario !== "") {
+                if (auth.preview) {
+                    console.warn("SELFTEST FAIL refusing to run the bridge group with VITTA_GREETER_PREVIEW=1");
+                    Qt.quit();
+                    return;
+                }
+                root.startBridgeScenario();
+                return;
+            }
             if (!auth.preview) {
                 console.warn("SELFTEST FAIL refusing to run without VITTA_GREETER_PREVIEW=1");
                 Qt.quit();

@@ -1,7 +1,6 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import Quickshell.Services.Greetd
 
 // greetd login state machine plus the other side effects the greeter has
 // (last-user file, poweroff/reboot). The UI (LoginScreen.qml) only talks to this
@@ -14,8 +13,8 @@ Scope {
     readonly property bool preview: Quickshell.env("VITTA_GREETER_PREVIEW") === "1"
     readonly property string scenario: String(Quickshell.env("VITTA_GREETER_SCENARIO") || "ok")
     readonly property string stateDir: String(Quickshell.env("VITTA_GREETER_STATE_DIR") || "/var/lib/greetd")
-    readonly property var backend: preview ? fake : Greetd
-    readonly property bool available: preview || Greetd.available
+    readonly property var backend: preview ? fake : bridge
+    readonly property bool available: preview || bridge.available
 
     // A login attempt is in flight (createSession .. launch / failure).
     property bool busy: false
@@ -133,6 +132,12 @@ Scope {
             // a tty session and Electron misses niri.desktop's DesktopNames=niri;GNOME.
             auth.backend.launch(["niri-session"], ["XDG_SESSION_TYPE=wayland", "XDG_SESSION_DESKTOP=niri", "XDG_CURRENT_DESKTOP=niri:GNOME"], true);
         }
+    }
+
+    // greetd client (GreetdBridge.qml, via /usr/libexec/vitta/vitta-greetd-bridge).
+    GreetdBridge {
+        id: bridge
+        active: !auth.preview
     }
 
     // ---- preview backend: same surface as the Greetd singleton -------------
