@@ -1,0 +1,103 @@
+#!/usr/bin/python3
+"""Line-delimited JSON bridge to greetd's framed Unix socket protocol."""
+
+import json
+import os
+import socket
+import struct
+import sys
+
+
+MAX_INPUT = 64 * 1024
+MAX_REPLY = 1024 * 1024
+
+
+def write_line(message):
+    sys.stdout.buffer.write(json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode() + b"\n")
+    sys.stdout.buffer.flush()
+
+
+def bridge_error(description):
+    write_line({"type": "error", "error_type": "bridge", "description": description})
+
+
+def receive_exact(connection, count):
+    chunks = []
+    while count:
+        chunk = connection.recv(count)
+        if not chunk:
+            raise EOFError
+        chunks.append(chunk)
+        count -= len(chunk)
+    return b"".join(chunks)
+
+
+def receive_reply(connection):
+    header = receive_exact(connection, 4)
+    (length,) = struct.unpack("=I", header)
+    if length > MAX_REPLY:
+        raise ValueError("greetd reply is too large")
+    body = receive_exact(connection, length)
+    reply = json.loads(body.decode("utf-8"))
+    if not isinstance(reply, dict):
+        raise ValueError("greetd reply is not a JSON object")
+    return reply
+
+
+def discard_remainder():
+    while True:
+        remainder = sys.stdin.buffer.readline()
+        if not remainder or remainder.endswith(b"\n"):
+            return
+
+
+def main():
+    socket_path = os.environ.get("GREETD_SOCK")
+    if not socket_path:
+        bridge_error("GREETD_SOCK is not set")
+        return 1
+    try:
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        connection.connect(socket_path)
+    except OSError:
+        bridge_error("could not connect to greetd")
+        return 1
+
+    with connection:
+        while True:
+            line = sys.stdin.buffer.readline(MAX_INPUT + 2)
+            if not line:
+                return 0
+            if len(line) > MAX_INPUT + 1 or (len(line) == MAX_INPUT + 1 and not line.endswith(b"\n")):
+                if not line.endswith(b"\n"):
+                    discard_remainder()
+                bridge_error("input line is too long")
+                continue
+            if line == b"\n":
+                continue
+            try:
+                request = json.loads(line.decode("utf-8"))
+                if not isinstance(request, dict):
+                    raise ValueError
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                bridge_error("input is not a JSON object")
+                continue
+            try:
+                payload = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            except (TypeError, ValueError):
+                bridge_error("input is not a JSON object")
+                continue
+            del request
+            del line
+            try:
+                connection.sendall(struct.pack("=I", len(payload)) + payload)
+                del payload
+                reply = receive_reply(connection)
+            except (EOFError, OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                bridge_error("greetd closed or sent an invalid reply")
+                return 1
+            write_line(reply)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
