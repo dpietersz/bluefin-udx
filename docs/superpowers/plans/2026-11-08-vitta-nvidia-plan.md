@@ -1,9 +1,22 @@
 # Vitta for the P14s (NVIDIA variant) — plan
 
-Status: **plan approved with owner decisions (§6), not started** (owner, 2026-11-08). Builds on everything
+Status: **implemented through Phase 4; owner switch and one-week acceptance remain** (2026-11-12). Builds on everything
 proven on the T580 (`vitta`, spec `2026-11-06-vitta-design.md`, boot splash
-`2026-11-07-…`, LUKS prompt `2026-11-08-…`). Execution starts only after the
-owner answers the open decisions in §6 and approves this plan.
+`2026-11-07-…`, LUKS prompt `2026-11-08-…`). The executable record is
+[`2026-11-11-vitta-nvidia-implementation.md`](2026-11-11-vitta-nvidia-implementation.md);
+the owner follows [`vitta-p14s-acceptance.md`](../../how-to/vitta-p14s-acceptance.md)
+before deciding to switch.
+
+## What changed during implementation (2026-11-12)
+
+- Upstream retired `base-nvidia`; `vitta-nvidia` now uses `base-main:44` plus
+  BlueBuild's `akmods` module with `nvidia-driver: nvidia-open`.
+- The module owns the four NVIDIA boot arguments in
+  `/usr/lib/bootc/kargs.d/00-bluebuild-nvidia-kargs.toml`.
+- D2 is superseded: greetd accepts a password only. Fingerprint remains for
+  hyprlock and sudo through the host authselect profile.
+- The executable plan and the P14s acceptance runbook above are authoritative
+  for implementation and the owner-operated hardware switch.
 
 ## 1. Goal
 
