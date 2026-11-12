@@ -69,7 +69,11 @@ rpm-ostree status -v
 
 First confirm that the first deployment listed by `rpm-ostree status` is the
 staged `vitta-nvidia:testing` deployment. Index `0` means that first-listed
-deployment. In its `rpm-ostree status -v` entry, expect both:
+deployment. Compare its `Digest:` line in `rpm-ostree status -v` with the
+digest recorded above. If it differs, CI published a newer build in between:
+record the new digest by re-running the `skopeo` command and continue, or run
+`sudo rpm-ostree cleanup -p` and start over. In its `rpm-ostree status -v`
+entry, expect both:
 
 ```text
 LayeredPackages: fuse-libs
@@ -192,7 +196,11 @@ Follow these steps in order. The text console login does not touch the
 keyring. Do this before the first graphical login.
 
 1. At the Vitta greeter, press `Ctrl+Alt+F3` and log in on the text console.
-   Comment out precisely the three keyring PAM lines:
+   **Warning:** This machine asks for a fingerprint first because authselect
+   puts the fingerprint module first for console logins and `sudo`. Touch the
+   sensor, or wait about 30 seconds for the `Password:` prompt; the `sudo` in
+   the next command does the same. Comment out precisely the three keyring PAM
+   lines:
 
    ```bash
    sudo sed -i -E 's@^([[:space:]]*-?(auth|password|session)[[:space:]].*pam_gnome_keyring\.so.*)$@# [keyring-pam disabled] \1@' /etc/pam.d/greetd
