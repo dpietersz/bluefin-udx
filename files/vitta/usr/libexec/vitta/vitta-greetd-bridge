@@ -134,12 +134,56 @@ def run():
     with connection:
         while True:
             if outstanding:
+                body = take_frame(reply_buffer)
+                if body is not None:
+                    reply = json.loads(body.decode("utf-8"))
+                    if not isinstance(reply, dict):
+                        raise ValueError("greetd reply is not a JSON object")
+                    outstanding = False
+                    deadline = None
+                    if not write_line(reply):
+                        return 0
+                    continue
+
+            if not outstanding and pending and not stdin_eof:
+                stdin_ready, _, _ = select.select([0], [], [], 0)
+                if stdin_ready:
+                    chunk = os.read(0, 65536)
+                    if chunk:
+                        input_buffer.extend(chunk)
+                        discarding = queue_lines(input_buffer, pending, discarding)
+                    else:
+                        stdin_eof = True
+                        # After EOF, finish complete queued lines in order. The final
+                        # unterminated line is a line too, matching readline() at EOF.
+                        if not discarding and input_buffer:
+                            pending.append(bytes(input_buffer))
+                        input_buffer.clear()
+                    continue
+
+            if not outstanding and pending:
+                line = pending.popleft()
+                if line is TOO_LONG:
+                    if not bridge_error("input line is too long"):
+                        return 0
+                elif line:
+                    try:
+                        sent = send_request(connection, line)
+                    except OSError:
+                        return fail("greetd closed or sent an invalid reply")
+                    if not sent:
+                        if not bridge_error("input is not a JSON object"):
+                            return 0
+                    else:
+                        outstanding = True
+                        deadline = time.monotonic() + reply_timeout()
+                continue
+
+            if outstanding:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return fail("greetd did not answer in time")
-                timeout = 0 if reply_buffer else remaining
-            elif pending:
-                timeout = 0
+                timeout = remaining
             elif stdin_eof:
                 return 0
             else:
@@ -150,12 +194,10 @@ def run():
                 readable.append(0)
             readable, _, _ = select.select(readable, [], [], timeout)
 
-            read_stdin_data = False
             # EOF wins while a request is outstanding: leave greetd immediately.
             if not stdin_eof and 0 in readable:
                 chunk = os.read(0, 65536)
                 if chunk:
-                    read_stdin_data = True
                     input_buffer.extend(chunk)
                     discarding = queue_lines(input_buffer, pending, discarding)
                 else:
@@ -173,34 +215,6 @@ def run():
                 if not chunk:
                     raise PeerClosedError
                 reply_buffer.extend(chunk)
-
-            if outstanding:
-                body = take_frame(reply_buffer)
-                if body is not None:
-                    reply = json.loads(body.decode("utf-8"))
-                    if not isinstance(reply, dict):
-                        raise ValueError("greetd reply is not a JSON object")
-                    outstanding = False
-                    deadline = None
-                    if not write_line(reply):
-                        return 0
-
-            if not read_stdin_data and not outstanding and pending:
-                line = pending.popleft()
-                if line is TOO_LONG:
-                    if not bridge_error("input line is too long"):
-                        return 0
-                elif line:
-                    try:
-                        sent = send_request(connection, line)
-                    except OSError:
-                        return fail("greetd closed or sent an invalid reply")
-                    if not sent:
-                        if not bridge_error("input is not a JSON object"):
-                            return 0
-                    else:
-                        outstanding = True
-                        deadline = time.monotonic() + reply_timeout()
 
 
 def main():

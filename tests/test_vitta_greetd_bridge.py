@@ -29,6 +29,11 @@ def load_bridge_module():
     return module
 
 
+def cpu_seconds(process):
+    fields = Path(f"/proc/{process.pid}/stat").read_text().split()
+    return (int(fields[13]) + int(fields[14])) / os.sysconf("SC_CLK_TCK")
+
+
 def read_line(stream, timeout=2):
     """Read one newline-delimited byte string without letting a test hang."""
     deadline = time.monotonic() + timeout
@@ -227,6 +232,30 @@ class VittaGreetdBridgeTests(unittest.TestCase):
         buffer.extend(struct.pack("=I", bridge.MAX_REPLY + 1))
         with self.assertRaises(ValueError):
             bridge.take_frame(buffer)
+
+    def test_idle_helper_does_not_spin(self):
+        self.start_server()
+        self.start_bridge()
+        before = cpu_seconds(self.bridge)
+        time.sleep(1)
+        used = cpu_seconds(self.bridge) - before
+        self.assertTrue(used < 0.2, f"CPU seconds: {used:.3f}")
+        self.assertEqual(self.close_bridge(), "")
+
+    def test_stalled_partial_reply_does_not_spin(self):
+        self.start_server("partial-stall")
+        self.start_bridge(timeout=2)
+        self.bridge.stdin.write(b'{"type":"create_session"}\n')
+        self.bridge.stdin.flush()
+        self.wait_for_log_count(1)
+        before = cpu_seconds(self.bridge)
+        time.sleep(1.5)
+        used = cpu_seconds(self.bridge) - before
+        self.assertTrue(used < 0.3, f"CPU seconds: {used:.3f}")
+        reply = json.loads(read_line(self.bridge.stdout, timeout=2))
+        self.assertEqual(reply, {"type": "error", "error_type": "bridge", "description": "greetd did not answer in time"})
+        self.assertEqual(self.bridge.wait(timeout=2), 1)
+        self.assertEqual(self.bridge.stderr.read().decode(), "")
 
     def test_silent_greetd_times_out(self):
         self.start_server("silent")
