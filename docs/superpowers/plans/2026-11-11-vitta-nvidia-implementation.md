@@ -29,7 +29,7 @@
 - `bluefin-udx`, `bluefin-udx-nvidia` and their CI behaviour stay unchanged (D5). `files/system/` gets nothing new. Shared Vitta files: `files/vitta/` + `recipes/vitta-modules.yml`. NVIDIA-only files: `files/vitta-nvidia/`, applied only by `recipes/vitta-nvidia.yml`.
 - CI publishes `vitta-nvidia` only as `:testing`, `:<YYYYMMDD>`, `:<sha7>`; cosign is installed and the signing key required **before** the push; `:stable` moves only through `promote-vitta.yml`.
 - No `cuda-toolkit`, no Flatpak/AppImage, none of the packages the Vitta gate already forbids. `equibop` and `fuse-libs` stay local layers (D3). Same splash badge as the T580 (D4).
-- Password login must work at any moment at the greeter, also while a fingerprint wait is active (D2). The greeter must never hang.
+- **Owner decision 2026-11-12 (supersedes D2): the greeter takes the password only.** Fingerprint is for the lock screen (hyprlock) and sudo/polkit, as on the T580 model. Research behind it: nobody has password and finger in parallel under greetd; the ledger has the sources. The greeter is not changed. The greeter must never hang.
 - **Nothing in this plan activates the image on this P14s.** No `rpm-ostree rebase`, `bootc switch`, `rpm-ostree kargs` edits, `authselect` changes, edits under `/etc`, or `chezmoi apply` on this machine; no `sudo`. Publishing `vitta-nvidia:testing` does not touch it: the P14s keeps following `bluefin-udx-nvidia:stable`. The switch is Phase 5, on the owner's word only.
 - Smoke-gate shell inside `podman run … -c '…'` uses only double quotes; the smoke `run:` block contains no `${{ }}`; any `run:` block with an expression stays under 21000 chars; no `grep -x` against lines that end in `\`.
 - No full local image builds. Verification of image content is CI on the PR (non-main runs never publish). A CI failure on an upstream network error (curl 5xx/56, Terra outage, kernel skew between `base-nvidia` and `akmods`) gets one re-run of the failed jobs before any debugging.
@@ -38,7 +38,7 @@
 
 ## Execution notes
 
-- Image work happens in the worktree `~/dev/Projects/bluefin-udx-vitta-nvidia`. Branch `vitta-nvidia` (Tasks 1–5, PR 1), then `vitta-nvidia-login` (Tasks 6, 7, 9, PR 2). The main working tree is never switched.
+- Image work happens in the worktree `~/dev/Projects/bluefin-udx-vitta-nvidia`. Branch `vitta-nvidia` (Tasks 1–5, PR 1), then `vitta-nvidia-phase3` in the worktree `~/dev/Projects/bluefin-udx-vitta-nvidia-login` (Tasks 6, 9, PR 2; Task 7 was dropped). The main working tree is never switched.
 - Implementers commit and run the local tests; the controller pushes, watches CI and dispatches fixes. Python tests: `python3 -m unittest tests/test_vitta_nvidia.py tests/test_vitta_overlay.py tests/test_vitta_bootsplash.py -v`.
 - New smoke-gate lines are added to **both** `.github/workflows/build.yml` and `scripts/local-build-test.sh`. Check a new snippet's shell locally against `ghcr.io/dpietersz/vitta:stable` or `ghcr.io/ublue-os/base-nvidia:44` (both in the local store); the real verdict is the CI leg.
 - **Hardware truth comes at the Phase 5 trial boot.** Nothing in Phases 0–4 runs on the P14s's GPU, panel or sensor. Each hardware risk below gets a CI gate where one is possible and a line in the acceptance runbook (Task 9) where it is not.
@@ -47,9 +47,9 @@
 ## Review Focus
 
 1. **Docked with the lid closed, or DRM card numbers swapped** (`card0` = NVIDIA): the greeter must still open on the GPU that has the connected display, and a single-GPU machine must get no pin at all → Task 5 fake-sysfs tests.
-2. **Wrong password on a machine with enrolled fingerprints:** must fail at once, not sit in pam_fprintd's 30 s wait → Task 7 scenario `fp-badpass`.
-3. **Enter on an empty password where no fingerprint can be read** (no prints, no reader, T580): a normal failure message, fields usable again, no hang → Task 7 scenario `fp-none`.
-4. **Machine without fingerprints (T580):** zero behaviour change; a wrong password fails in about 2 s with no fprintd message → Task 6 PAM probe on both Vitta legs, Task 7 keeps the four existing scenarios unchanged.
+2. **Machine with enrolled fingerprints and authselect `with-fingerprint` in its `/etc` (P14s):** a typed password at the greeter must be checked at once, with no fingerprint prompt and no wait → Task 6 PAM stack test (no `system-auth`, no `pam_fprintd` on any greetd `auth` line) and probe.
+3. **Empty password at the greeter:** a plain failure in about 2 s, fields usable again → Task 6 probe; the greeter's existing `badpass` selftest.
+4. **Machine without fingerprints (T580):** zero behaviour change for a password login → Task 6 PAM probe on both Vitta legs; greeter files untouched.
 5. **`/etc` carried over from Bluefin** (authselect `system-auth` with `pam_fprintd` first, no `/etc/pam.d/greetd`, kernel args already on the command line): greetd's auth must not depend on `system-auth`; the four args must appear once → Task 6 PAM stack test, Task 9 runbook pre-reboot check.
 
 ---
@@ -149,63 +149,39 @@ Selection rule: fewer than two `card[0-9]+` entries → nothing. Else the card o
 
 **After Task 5:** controller opens PR 1, watches the four legs, runs a whole-branch review, then **stops (S1)**. After the merge: `skopeo inspect docker://ghcr.io/dpietersz/vitta-nvidia:testing` without credentials and `cosign verify --key cosign.pub …`; a 401 means the new GHCR package is private and the owner makes it public.
 
-### Task 6: fprintd and greetd's own auth stack (Phase 3) — login-focused review
+### Task 6: Password-only greetd auth stack, fprintd for lock screen and sudo (Phase 3) — login-focused review
 
 **Files:**
-- Create: `tests/smoke/pam_probe.py`
+- Create: `tests/smoke/pam_probe.py`, `tests/test_vitta_pam_probe.py`
 - Modify: `recipes/vitta-modules.yml` (`fprintd`, `fprintd-pam`), `files/vitta/etc/pam.d/greetd`, `tests/test_vitta_overlay.py`, `tests/test_vitta_nvidia.py`, both smoke gates (mount `tests/smoke` read-only at `/smoke`; local script adds `,z`), `RECIPE.md`
+- Not touched: everything under `files/vitta/usr/share/vitta/greeter/` and `files/vitta/usr/bin/vitta-greeter-preview`.
 
 **Interfaces:**
 - Produces: PAM service `greetd` whose auth section is exactly, in this order:
   ```
-  auth  required                    pam_env.so
-  auth  required                    pam_faildelay.so delay=2000000
-  auth  [success=3 default=ignore]  pam_unix.so nullok
-  auth  [default=ignore]            pam_echo.so vitta:fingerprint
-  auth  [success=1 default=ignore]  pam_fprintd.so max-tries=3 timeout=30
-  auth  requisite                   pam_deny.so
-  -auth optional                    pam_gnome_keyring.so
-  -auth optional                    pam_kwallet5.so
-  -auth optional                    pam_kwallet.so
-  auth  include                     postlogin
+  auth  required  pam_env.so
+  auth  required  pam_faildelay.so delay=2000000
+  auth  required  pam_unix.so nullok
+  -auth optional  pam_gnome_keyring.so
+  -auth optional  pam_kwallet5.so
+  -auth optional  pam_kwallet.so
+  auth  include   postlogin
   ```
-  Account, password and session sections stay as they are.
-- Contract for Task 7: a correct password succeeds at the first prompt and the conversation never carries the info message `vitta:fingerprint`. An empty or wrong answer makes PAM send the info message `vitta:fingerprint` (the marker, exact text, never shown to the user) and then run pam_fprintd, which either talks to the user and waits for a finger (prints enrolled) or returns at once (no reader, no prints, no daemon) into `pam_deny`.
-- Produces: `python3 /smoke/pam_probe.py SERVICE USER PASSWORD --expect success|fail --max-seconds N [--expect-message TEXT] [--forbid-message TEXT]` (ctypes on `libpam.so.0`, answers every prompt with PASSWORD, prints each PAM message, exit 0 only when result, duration and message conditions all hold).
+  Account, password and session sections stay as they are. No `system-auth` and no `pam_fprintd` on any `auth` line: on the P14s authselect's `with-fingerprint` puts `pam_fprintd` first in `system-auth`, and under greetd's single PAM conversation that would hold a typed password for the whole fingerprint timeout. `pam_unix` is `required`, so success does not depend on the optional keyring modules.
+- Produces: `fprintd` and `fprintd-pam` in the image, for hyprlock's fingerprint unlock and for sudo/polkit through the machine's own authselect profile. Inert without a reader.
+- Produces: `python3 /smoke/pam_probe.py SERVICE USER PASSWORD --expect success|fail --max-seconds N [--expect-message TEXT] [--forbid-message TEXT]` (ctypes on `libpam.so.0`, answers every prompt with PASSWORD, prints each PAM message, never the password; hard stop at N plus a small grace; a conversation callback error is a failure; exit 0 only when result, duration and message conditions all hold).
 
-- [ ] **Step 1: Failing tests** in `tests/test_vitta_overlay.py`: `test_greetd_auth_is_password_first_then_fingerprint` (the ten auth lines in order; no `system-auth` on any `auth` line; the jump from `pam_unix` (3) and from `pam_fprintd` (1) both land on the `pam_gnome_keyring.so` line; `pam_echo` control is `[default=ignore]`); `test_greetd_other_sections_unchanged` (the account, password and session lines equal a list written out in the test, copied from today's file); update `test_pam_password_substack_reaches_keyring` only if its assertion text moved. In `tests/test_vitta_nvidia.py`: `test_fprintd_is_shared` (`fprintd`, `fprintd-pam` in `vitta-modules.yml`).
+The probe, its unit tests and the gate block exist on the archived local branch `vitta-nvidia-login` (commit 8e4ced0, reviewed there); take them from that branch and cut them down to this task: no marker, no `pam_exec` helper, no `pam_echo`.
+
+- [ ] **Step 1: Failing tests** in `tests/test_vitta_overlay.py`: `test_greetd_auth_is_password_only` (the seven auth lines in order; no `system-auth`, `pam_fprintd`, `pam_exec` or `pam_echo` on any `auth` line; `pam_unix.so` is `required`); `test_greetd_other_sections_unchanged` (the account, password and session lines equal a list written out in the test, copied from today's file); `test_greeter_files_match_main` is NOT wanted (no test pins git history). In `tests/test_vitta_nvidia.py`: `test_fprintd_is_shared` (`fprintd`, `fprintd-pam` in `vitta-modules.yml`, not in `vitta-nvidia.yml`); `test_gates_probe_greetd_auth` (both gates mount `/smoke` without a GitHub expression and run the four probes below).
 - [ ] **Step 2:** Run → FAIL.
-- [ ] **Step 3:** Implement PAM file (comment block: why self-contained, D2, what the marker is for, no `pam_faillock` on purpose because the greeter answers `""` to wait for a finger), packages, probe.
-- [ ] **Step 4:** Gate (`IS_VITTA`): `check_rpm fprintd fprintd-pam`; `check_file` for `pam_fprintd.so` and `pam_echo.so` in `/usr/lib64/security`; create `vittaprobe` with a known password, then three probe runs: correct → `success` within 5 s, `--forbid-message vitta:fingerprint`; wrong → `fail` within 10 s, `--expect-message vitta:fingerprint`; empty → `fail` within 10 s, `--expect-message vitta:fingerprint`. Try the probe locally first in `ghcr.io/dpietersz/vitta:stable` with the new PAM file bind-mounted (pam_fprintd is absent there: the line must count as a failed module, and the three results must hold).
-- [ ] **Step 5:** `RECIPE.md` rows for `fprintd`, `fprintd-pam` (bake reason `system-integration`). Commit `feat(vitta): fingerprint-capable greetd auth stack`.
+- [ ] **Step 3:** Implement PAM file (comment block: why self-contained, the owner decision, that fingerprint lives at the lock screen and sudo), packages, probe + its unit tests.
+- [ ] **Step 4:** Gate (`IS_VITTA`), each probe under `timeout -k 5 25`: `check_rpm fprintd fprintd-pam`; create `vittaprobe` with a known password; correct → `success` within 5 s; wrong → `fail` within 10 s; empty → `fail` within 10 s; a copy of the service with every keyring/kwallet auth line removed, correct password → `success`. Prove the same four in a throwaway `ghcr.io/dpietersz/vitta:stable` container first, plus one more there: with `pam_permit.so` copied in as `pam_fprintd.so`, a wrong password still fails (nothing in the stack can reach a fingerprint module).
+- [ ] **Step 5:** `RECIPE.md` rows for `fprintd`, `fprintd-pam` (bake reason `system-integration`). Commit `feat(vitta): password-only greetd auth stack, fprintd for lock screen and sudo`.
 
-### Task 7: Fingerprint at the login screen (Phase 3) — login-focused review
+### Task 7: (dropped)
 
-**Files:**
-- Modify: `files/vitta/usr/share/vitta/greeter/Auth.qml`, `LoginScreen.qml`, `selftest.qml`, `files/vitta/usr/bin/vitta-greeter-preview`, `tests/test_vitta_overlay.py` (the selftest already runs in both smoke gates)
-
-**Interfaces:**
-- Consumes: Task 6 contract, marker text `vitta:fingerprint`.
-- Produces in `Auth.qml`: `property string mode` (`""`, `"password"`, `"fingerprint"`); `login(name, password)` keeps its signature and now accepts an empty password. Preview scenarios `fp-ok`, `fp-password`, `fp-badpass`, `fp-fail`, `fp-none` in `vitta-greeter-preview` (`--scenario` and the default `--selftest` list).
-
-Behaviour (exact; owner decision: Enter on an empty password field starts the fingerprint wait, nothing starts on its own):
-- `login(name, "")` is allowed. The first secret prompt is answered with the typed password, also when it is empty.
-- The info message `vitta:fingerprint` is never shown. If the password that was sent is non-empty: PAM refused it → `cancelSession()`, `failed("Authentication failure")`, and the greeter stays busy for 2000 ms (stand-in for the fail delay the cancel skips). If it was empty: `mode = "fingerprint"`.
-- In fingerprint mode, fprintd's own messages go to the status line as they come (errors in the error colour); `readyToLaunch` launches as today; an auth failure is the normal `failed(...)` path.
-- `login(name, password)` with a non-empty password while `mode === "fingerprint"`: `cancelSession()`, then the normal password attempt. The new `createSession` goes out only after greetd has dropped the old session (follow the `Greetd` singleton's state, do not fire both in one tick). Esc during a wait cancels it (existing `cancel()`).
-- A conversation with no marker behaves exactly as today (info messages after a correct password, such as an expiry warning, are shown and do not cancel anything).
-
-- [ ] **Step 1: Failing selftests** in `selftest.qml` (asserting the fake backend's `createCount`, `cancelCount`, `responses`, `launches` and the status line); the fake backend gains `info` and `hold` steps:
-  - `fp-ok`: submit with empty password → responses `[""]`; marker not in the status line; `Place your finger on the fingerprint reader` shown; one launch.
-  - `fp-password`: wait active (`hold`), then submit `pw` → `cancelCount` 1, `createCount` 2, responses `["", "pw"]`, one launch.
-  - `fp-badpass`: submit `pw`, fake sends the marker → `cancelCount` 1, status `Authentication failure` in the error colour, no launch, a second submit inside 2000 ms is ignored and one after it works.
-  - `fp-fail`: empty submit, marker, info, error `Failed to match fingerprint`, auth failure → failure shown, password field focused, no launch.
-  - `fp-none`: empty submit, marker, auth failure with no fprintd message → failure shown, no launch, a following password login succeeds.
-  - New assertion in `ok`: an info message after the secret (no marker) is shown and the launch still happens. The existing `ok`, `badpass`, `multiprompt`, `error` assertions are otherwise unchanged.
-- [ ] **Step 2:** `VITTA_ROOT=$PWD/files/vitta files/vitta/usr/bin/vitta-greeter-preview --selftest` → the five new scenarios FAIL.
-- [ ] **Step 3:** Implement.
-- [ ] **Step 4:** Selftest PASS for all nine scenarios and the cage edge check; `python3 -m unittest tests/test_vitta_overlay.py -v` PASS (add `test_preview_knows_fingerprint_scenarios`). Controller looks at `--scenario fp-ok` and `fp-badpass` in a window, dark and light.
-- [ ] **Step 5:** Commit `feat(vitta-greeter): fingerprint login on an empty password`.
+Fingerprint at the login screen was built and reviewed on the local branch `vitta-nvidia-login` (password first, Enter on an empty field for the finger) and then dropped by owner decision on 2026-11-12 in favour of password-only login. The greeter is unchanged from `main`.
 
 ### Task 8: Dotfiles for vitta-nvidia (Phase 3) — worktree `~/dotfiles-vitta-nvidia`
 
@@ -215,7 +191,7 @@ Behaviour (exact; owner decision: Enter on an empty password field starts the fi
 
 **Interfaces:**
 - Produces: `expectedImageFamily` = `vitta-nvidia` when os-release has `VARIANT_ID=vitta-nvidia` (quotes optional) or the booted ref matches `ghcr\.io/dpietersz/vitta-nvidia(:|@|$)`; that ref also sets `isMyImage`. Every other fixture result is unchanged, in particular this P14s on `bluefin-udx-nvidia`.
-- Produces: greetd keyring guard, rendered to a no-op unless `isVitta` and `hasFingerprintReader` (and not remote/macOS/server). It rebuilds `/etc/pam.d/greetd` from the image's pristine `/usr/etc/pam.d/greetd` with the active `pam_gnome_keyring.so` lines commented (`# [keyring-pam disabled] …`), keeps a `.bak`, restores it if `pam_unix.so` or `pam_deny.so` is no longer active in the auth section, and re-fires through a rendered sha256 of `/usr/etc/pam.d/greetd`, so a later image change to the PAM file reaches the P14s instead of being shadowed by the local edit.
+- Produces: greetd keyring guard, rendered to a no-op unless `isVitta` and `hasFingerprintReader` (and not remote/macOS/server). It rebuilds `/etc/pam.d/greetd` from the image's pristine `/usr/etc/pam.d/greetd` with the active `pam_gnome_keyring.so` lines commented (`# [keyring-pam disabled] …`), keeps a `.bak`, restores it if `pam_unix.so` is no longer active in the auth section, and re-fires through a rendered sha256 of `/usr/etc/pam.d/greetd`, so a later image change to the PAM file reaches the P14s instead of being shadowed by the local edit.
 
 - [ ] **Step 1:** `git -C ~/dotfiles worktree add ~/dotfiles-vitta-nvidia -b vitta-nvidia main`; baseline `bun test tests/image-identity.test.ts tests/hyprlock-vitta.test.ts` and `python3 -m unittest discover -s tests -p 'test_windows_work*.py' -v`; note pre-existing failures.
 - [ ] **Step 2: Failing tests:** identity fixtures (Vitta NVIDIA os-release with unknown ref; `vitta-nvidia:testing` ref via rpm-ostree and via bootc; plain `vitta` unchanged; `bluefin-udx-nvidia` + `hasNvidia` unchanged). `tests/keyring-greetd.test.ts` runs the rendered script body against a temp root (`PAM_SRC`, `PAM_DST` overridable, `sudo` stubbed): three keyring lines commented, other lines byte-identical to the source, second run is a no-op, the sanity failure restores the backup, and the gate renders `exit 0` for Bluefin with a reader and for Vitta without one.
@@ -234,17 +210,17 @@ Behaviour (exact; owner decision: Enter on an empty password field starts the fi
   1. Before the switch: save `rpm-ostree status`, `rpm-ostree kargs`, `virsh -c qemu:///system dumpxml windows-work`, `authselect current`, `fprintd-list $USER`, `flatpak list | wc -l`; confirm the login keyring is passwordless.
   2. Rebase to `ostree-image-signed:docker://ghcr.io/dpietersz/vitta-nvidia:testing`; **before reboot**: `rpm-ostree kargs` shows each of the four args once; `LocalPackages` still lists `equibop` (D3).
   3. First boot: splash and styled LUKS prompt on the 2560×1600 panel, crisp; Esc gives the text prompt; greeter edge to edge on the internal panel; docked with lid closed as a second run.
-  4. Login: Enter on an empty password, then finger; password typed while the fingerprint wait runs; wrong password fails within about 3 s; lock screen finger; no keyring prompt; `login.keyring` not rewritten after a password login.
+  4. Login: password at the greeter is checked at once (no fingerprint prompt, no wait); wrong password fails within about 3 s; finger at the lock screen and for `sudo`; no keyring prompt; `login.keyring` not rewritten after the password login.
   5. `cd ~/dotfiles && git pull && chezmoi init && chezmoi apply`, then the greetd guard's result (`grep pam_gnome_keyring /etc/pam.d/greetd`).
   6. NVIDIA: `nvidia-smi` (620.x), dGPU `runtime_status` `suspended` when idle, `podman run --rm --device nvidia.com/gpu=all nvcr.io/nvidia/cuda:13.2-devel-fedora41 nvidia-smi`, toolbox with `nvidia=true`, `switcherooctl list`, an `h264_nvenc` test encode, OBS virtual camera on `/dev/video10`.
   7. Windows VM: `python3 -m unittest discover -s tests -p 'test_windows_work*.py' -v`, real boot, `Z:`/`Y:`/`X:`, camera, `windows-work-audio`.
   8. Dock (`boltctl list`, external displays), Telegram bot (R24), idle → lock → suspend, 5 min idle at the greeter.
   9. Recovery: previous deployment in GRUB, `rpm-ostree rollback`; promotion command for `vitta-nvidia`.
-- [ ] **Step 3:** Docs pass over README / RECIPE / MAINTENANCE / CLAUDE.md for everything Tasks 4–7 added (fingerprint login and its marker, `tests/smoke/`, `DeviceScale`, GPU pin).
+- [ ] **Step 3:** Docs pass over README / RECIPE / MAINTENANCE / CLAUDE.md for everything Tasks 4–6 added (password-only greetd stack, fprintd for lock screen and sudo, `tests/smoke/`, `DeviceScale`, GPU pin).
 - [ ] **Step 4:** Commit `docs(vitta-nvidia): P14s acceptance runbook and parity gates`.
 
 ### Task 10: Branch review and hand-over
 
-- [ ] **Step 1:** Controller opens PR 2 (`vitta-nvidia-login`), watches all four legs green, reads the `vitta` leg log for the PAM probe and the nine selftests.
-- [ ] **Step 2:** Whole-branch review by a fresh reviewer with the Review Focus list and a login/passphrase brief (PAM jump counts, marker handling, cancel paths, what the T580 sees).
+- [ ] **Step 1:** Controller opens PR 2 (`vitta-nvidia-phase3`), watches all four legs green, reads both Vitta legs' logs for the PAM probe and the greeter selftest.
+- [ ] **Step 2:** Whole-branch review by a fresh reviewer with the Review Focus list and a login/passphrase brief (the greetd auth stack, what a rebased P14s and the T580 see).
 - [ ] **Step 3:** Ledger updated; **stop (S2)**: owner merges PR 2 and the dotfiles branch. Phase 5 starts only on the owner's word.
