@@ -106,7 +106,8 @@ Scope {
     }
 
     function handleLine(line) {
-        if (line.trim() === "") return;
+        // A helper that was already given up on (lost()) has nothing to say.
+        if (!helperUp || line.trim() === "") return;
         let reply;
         try {
             reply = JSON.parse(line);
@@ -121,7 +122,7 @@ Scope {
             lost(String(reply.description || ""));
             return;
         }
-        if (!helperUp || sent.length === 0) {
+        if (sent.length === 0) {
             // Nothing asked: not a reply to us. Never happens with a sane helper.
             console.warn("vitta-greeter: ignoring an unrequested greetd reply of type " + String(reply.type));
             return;
