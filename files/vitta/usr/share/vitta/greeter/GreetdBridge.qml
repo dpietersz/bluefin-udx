@@ -55,6 +55,10 @@ Scope {
 
     function cancelSession() {
         if (!sessionOpen) return;
+        // greetd schedules the session when it gets start_session: once that
+        // is written, the launch completes (success: launched() and quit; an
+        // error still reaches Auth.qml) and no cancel_session follows it.
+        if (sent.some(entry => entry.kind === "start")) return;
         sessionOpen = false;
         // Replies to what the cancelled attempt has on the wire are swallowed,
         // and what it has not sent yet is dropped: cancel_session resets greetd.
