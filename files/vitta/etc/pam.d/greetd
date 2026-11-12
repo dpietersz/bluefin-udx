@@ -1,17 +1,19 @@
 #%PAM-1.0
-# Vitta: greetd owns this auth stack so it stays password-only. A machine's
-# authselect with-fingerprint puts pam_fprintd first in system-auth, which would
-# hold a typed password under greetd's single PAM conversation. Owner decision:
-# fingerprint is for the lock screen and sudo; pam_unix is required so optional
-# keyring modules cannot decide success. These are Fedora stock local system-auth
-# auth modules in the same order.
-auth       required    pam_env.so
-auth       required    pam_faildelay.so delay=2000000
-auth       required    pam_unix.so nullok
--auth      optional    pam_gnome_keyring.so
--auth      optional    pam_kwallet5.so
--auth      optional    pam_kwallet.so
-auth       include     postlogin
+# Vitta: greetd owns this password-only auth stack. authselect with-fingerprint
+# puts pam_fprintd first in system-auth, which would hold a typed password under
+# greetd's single PAM conversation; fingerprint stays for the lock screen/sudo.
+# Do not include system-auth or a fingerprint module here. pam_unix success jumps
+# over requisite pam_deny to required pam_permit; pam_env/pam_faildelay ignore, so
+# pam_permit records success while every failure ends at pam_deny.
+auth       required                    pam_env.so
+auth       required                    pam_faildelay.so delay=2000000
+auth       [success=1 default=ignore]  pam_unix.so nullok
+auth       requisite                   pam_deny.so
+auth       required                    pam_permit.so
+-auth      optional                    pam_gnome_keyring.so
+-auth      optional                    pam_kwallet5.so
+-auth      optional                    pam_kwallet.so
+auth       include                     postlogin
 
 account    required    pam_sepermit.so
 account    required    pam_nologin.so

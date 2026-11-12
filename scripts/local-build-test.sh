@@ -11,6 +11,7 @@
 
 set -euo pipefail
 
+REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RECIPE="${1:-bluefin-udx}"
 RECIPE_FILE="recipes/${RECIPE}.yml"
 

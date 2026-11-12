@@ -141,6 +141,28 @@ class VittaNvidiaCiTests(unittest.TestCase):
                 ):
                     self.assertIn(line, text)
 
+    def test_local_gate_run_variables_are_assigned_before_use(self):
+        lines = self.LOCAL_GATE.read_text().splitlines()
+        run_index = next(index for index, line in enumerate(lines) if line.startswith("$RUNNER run "))
+        run_line = lines[run_index]
+        variables = {
+            match.group("braced") or match.group("plain")
+            for match in re.finditer(
+                r"\$(?:\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<plain>[A-Za-z_][A-Za-z0-9_]*))",
+                run_line,
+            )
+        }
+        assigned_before_run = {
+            match.group(1)
+            for line in lines[:run_index]
+            if (match := re.match(r"\s*(?:export )?([A-Za-z_][A-Za-z0-9_]*)=", line))
+        }
+        self.assertEqual(variables, {"RUNNER", "RECIPE", "REPO_ROOT", "IMAGE"})
+        self.assertTrue(
+            variables <= assigned_before_run,
+            f"variables used before assignment: {sorted(variables - assigned_before_run)}",
+        )
+
     def test_nvidia_kargs_come_from_akmods_module(self):
         for gate in (self.BUILD_WORKFLOW, self.LOCAL_GATE):
             with self.subTest(gate=gate):
