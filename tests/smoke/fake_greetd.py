@@ -99,6 +99,10 @@ def serve_client(connection, args, password, log, deadline):
         if args.script == "silent":
             time.sleep(max(0, deadline - time.monotonic()))
             return
+        if args.script == "partial-stall":
+            connection.sendall(frame({"type": "success"})[:1])
+            time.sleep(max(0, deadline - time.monotonic()))
+            return
         request_type = request.get("type")
         if request_type == "cancel_session":
             send_reply(connection, {"type": "success"}, args.script == "split", args.script == "delayed")
@@ -162,7 +166,7 @@ def parse_args():
         "--script",
         choices=(
             "ok", "badpass", "multiprompt", "info", "split", "merged", "died", "silent", "delayed", "unicode",
-            "surrogate", "probe-early",
+            "surrogate", "probe-early", "partial-stall",
         ),
         required=True,
     )
