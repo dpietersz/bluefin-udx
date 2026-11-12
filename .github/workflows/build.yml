@@ -1166,15 +1166,30 @@ jobs:
                     echo "  FAIL  nvidia not resolvable or unsigned for kernel $VITTA_KVER"
                     FAIL=1
                 fi
-                check_file /usr/lib/bootc/kargs.d/10-vitta-nvidia.toml
+                check_file /usr/lib/bootc/kargs.d/00-bluebuild-nvidia-kargs.toml
                 for NVIDIA_KARG in rd.driver.blacklist=nouveau modprobe.blacklist=nouveau nvidia-drm.modeset=1 initcall_blacklist=simpledrm_platform_driver_init; do
-                    if grep -Fq "\"$NVIDIA_KARG\"" /usr/lib/bootc/kargs.d/10-vitta-nvidia.toml; then
-                        echo "  ok    vitta-nvidia karg $NVIDIA_KARG"
+                    NVIDIA_KARG_COUNT=$(grep -rhoFo -- "$NVIDIA_KARG" /usr/lib/bootc/kargs.d/*.toml 2>/dev/null | wc -l || true)
+                    if [ "$NVIDIA_KARG_COUNT" -eq 1 ]; then
+                        echo "  ok    NVIDIA karg once: $NVIDIA_KARG"
                     else
-                        echo "  FAIL  vitta-nvidia karg missing: $NVIDIA_KARG"
+                        echo "  FAIL  NVIDIA karg $NVIDIA_KARG occurs $NVIDIA_KARG_COUNT times, expected once"
                         FAIL=1
                     fi
                 done
+                check_rpm ublue-os-nvidia-addons
+                NVIDIA_PERSISTENCED_STATE=$(systemctl is-enabled nvidia-persistenced.service 2>/dev/null || true)
+                if [ "$NVIDIA_PERSISTENCED_STATE" = enabled ]; then
+                    echo "  ok    nvidia-persistenced.service enabled"
+                else
+                    echo "  FAIL  nvidia-persistenced.service is ${NVIDIA_PERSISTENCED_STATE:-missing}, expected enabled"
+                    FAIL=1
+                fi
+                if grep -Fq "force_drivers" /usr/lib/dracut/dracut.conf.d/99-nvidia.conf && grep -Fq " i915 " /usr/lib/dracut/dracut.conf.d/99-nvidia.conf; then
+                    echo "  ok    99-nvidia.conf forces i915"
+                else
+                    echo "  FAIL  99-nvidia.conf lacks force_drivers or i915"
+                    FAIL=1
+                fi
                 if grep -Eq "^[[:space:]]*blacklist[[:space:]]+nouveau([[:space:]]|$)" /usr/lib/modprobe.d/nvidia.conf; then
                     echo "  ok    nvidia.conf blacklists nouveau"
                 else

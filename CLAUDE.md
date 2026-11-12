@@ -9,9 +9,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `bluefin-udx` — Intel/AMD (ThinkPad T580)
 - `bluefin-udx-nvidia` — NVIDIA open kernel (ThinkPad P14s Gen5)
 - `vitta` — T580-first replacement, released as `ghcr.io/dpietersz/vitta:stable` only after owner-approved promotion
-- `vitta-nvidia` — ThinkPad P14s Gen 5 testing image on `base-nvidia:44`; the owner decides when it is switched
+- `vitta-nvidia` — ThinkPad P14s Gen 5 testing image on `base-main:44` with the NVIDIA open driver from BlueBuild's akmods module; the owner decides when it is switched
 
-Built nightly (04:20 UTC) and on push to `recipes/`, `scripts/`, `files/`, `cosign.pub`, or the workflow itself. The images are cosign-signed and use the baked trust policy; Vitta CI pushes only `:testing`, date, and SHA tags—never `:stable`. Either Vitta image is promoted manually through `promote-vitta.yml` with its `image` choice input, never by `build.yml`. Shared Vitta modules and overlay live in `recipes/vitta-modules.yml` and `files/vitta/`; NVIDIA-only additions live in `recipes/vitta-nvidia.yml` and `files/vitta-nvidia/`, never in shared overlays.
+Built nightly (04:20 UTC) and on push to `recipes/`, `scripts/`, `files/`, `cosign.pub`, or the workflow itself. The images are cosign-signed and use the baked trust policy; Vitta CI pushes only `:testing`, date, and SHA tags—never `:stable`. Either Vitta image is promoted manually through `promote-vitta.yml` with its `image` choice input, never by `build.yml`. Shared Vitta modules and overlay live in `recipes/vitta-modules.yml` and `files/vitta/`; NVIDIA-only additions belong in `recipes/vitta-nvidia.yml` and, when needed in future, `files/vitta-nvidia/` (none today), never in shared overlays.
 
 It is **NOT** a community distro. The package list is Dimitri's; forks are welcome but unsupported.
 
@@ -79,7 +79,7 @@ recipes/
   bluefin-udx.yml         # Intel/AMD entry point (base: bluefin-dx)
   bluefin-udx-nvidia.yml  # NVIDIA entry point (base: bluefin-dx-nvidia-open)
   vitta.yml               # Vitta entry point (base: base-main:44)
-  vitta-nvidia.yml        # NVIDIA Vitta entry point (base: base-nvidia:44)
+  vitta-nvidia.yml        # NVIDIA Vitta entry point (base: base-main:44 + akmods NVIDIA)
   vitta-modules.yml       # Vitta-only desktop plumbing and module order
 files/
   scripts/                # Inline bluebuild scripts (teams-wayland-patch, install-cosign-policy)
@@ -90,7 +90,7 @@ files/
     usr/lib/pki/containers/{bluefin-udx,bluefin-udx-nvidia}.pub  # cosign pubkeys baked into image
     usr/share/wayland-sessions/niri.desktop      # Override DesktopNames=niri → niri;GNOME for Electron password-store detection
   vitta/                  # Shared Vitta overlay (greeter, theme, Plymouth splash + LUKS prompt and its dracut font module, repos, services)
-  vitta-nvidia/           # NVIDIA-only Vitta overlay; never add these files to files/system or files/vitta
+  vitta-nvidia/           # Future NVIDIA-only Vitta overlay (none today); never add files to files/system or files/vitta
 scripts/
   local-build-test.sh     # Local mirror of the CI smoke-boot gate (Phase checks live in here)
   check-fedora-next.sh    # Resolves bluefin and Vitta recipe sets via RECIPES/BASE_IMAGE env
@@ -139,7 +139,7 @@ Validation is the regression tests plus the build gate and smoke-boot. Run focus
 
 ## When making changes
 
-1. **Adding a package**: Decide it actually belongs here (see division of responsibility + `RECIPE.md` bake criteria). Shared packages go in `recipes/common.yml` under the correct Phase and are built into `bluefin-udx`, `bluefin-udx-nvidia`, `vitta`, and `vitta-nvidia`. Shared Vitta files go in `recipes/vitta-modules.yml` and `files/vitta/`; NVIDIA-only Vitta packages and files go in `recipes/vitta-nvidia.yml` and `files/vitta-nvidia/`, never `files/system/` or `files/vitta/`. Add a row to `RECIPE.md` with source, bake reason, and fallback. Add matching `check_rpm` / `check_bin` coverage to both smoke gates: the inline gate in `.github/workflows/build.yml` and `scripts/local-build-test.sh`; gate checks with `IS_VITTA` and `IS_NVIDIA`. For shared changes, run every applicable recipe; for Vitta-NVIDIA-only changes, run `./scripts/local-build-test.sh vitta-nvidia`.
+1. **Adding a package**: Decide it actually belongs here (see division of responsibility + `RECIPE.md` bake criteria). Shared packages go in `recipes/common.yml` under the correct Phase and are built into `bluefin-udx`, `bluefin-udx-nvidia`, `vitta`, and `vitta-nvidia`. Shared Vitta files go in `recipes/vitta-modules.yml` and `files/vitta/`; NVIDIA-only Vitta packages go in `recipes/vitta-nvidia.yml`, while future NVIDIA-only files belong in `files/vitta-nvidia/` (none today), never `files/system/` or `files/vitta/`. Add a row to `RECIPE.md` with source, bake reason, and fallback. Add matching `check_rpm` / `check_bin` coverage to both smoke gates: the inline gate in `.github/workflows/build.yml` and `scripts/local-build-test.sh`; gate checks with `IS_VITTA` and `IS_NVIDIA`. For shared changes, run every applicable recipe; for Vitta-NVIDIA-only changes, run `./scripts/local-build-test.sh vitta-nvidia`.
 2. **Adding a vendor repo**: If upstream's `.repo` file is broken (e.g. `gpgkey=` pointing at a signature file like Beekeeper Studio did), ship a corrected shared repo at `files/system/etc/yum.repos.d/` rather than fighting upstream. Put Vitta-only repos in `files/vitta/etc/yum.repos.d/`. Note it explicitly in the owning recipe so the next reader doesn't re-add the broken URL.
 3. **Adding a COPR**: Verify it's had a build in the last 90 days and supports `%OS_VERSION%` substitution. Document the fallback in `RECIPE.md`. Add it to the quarterly check in `MAINTENANCE.md`.
 4. **Anything CUDA**: Do not bake `cuda-toolkit`. The atomic FS strips `/usr/local` at commit and the RPM installs there. Use `nvcr.io/nvidia/cuda:*-devel-fedora41` containers per-project (rationale is documented inline in `bluefin-udx-nvidia.yml`).

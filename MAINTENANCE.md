@@ -124,7 +124,7 @@ Vitta `:stable` is an owner-promoted release. The Vitta/base-main checks below r
 
 **Vitta / `base-main` health (quarterly after promotion; useful while testing):**
 - [ ] Check `ghcr.io/ublue-os/base-main:44` freshness and its Fedora-major cadence with `skopeo inspect --no-tags docker://ghcr.io/ublue-os/base-main:44`; keep Vitta pinned to an intentional major and run the Vitta leg of `scripts/check-fedora-next.sh` before changing it.
-- [ ] Check `ghcr.io/ublue-os/base-nvidia:44` freshness and record the NVIDIA driver branch it ships before rebuilding or promoting `vitta-nvidia`; investigate an unexpected driver-branch change with the Vitta-NVIDIA smoke gate before the owner switches the P14s.
+- [ ] Check that `ghcr.io/ublue-os/akmods-nvidia-open:main-44` has a build for the current `base-main` kernel and record the NVIDIA driver branch it ships before rebuilding or promoting `vitta-nvidia`; investigate an unexpected driver-branch change with the Vitta-NVIDIA smoke gate before the owner switches the P14s.
 - [ ] On Vitta, record `rpm -q greetd cage quickshell` and run the image smoke gate or `vitta-greeter-preview --selftest`; investigate Fedora updates that change the login-stack versions or break the headless greeter check.
 - [ ] Verify the baked VS Code signing key still hashes to `2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6` (`sha256sum /etc/pki/rpm-gpg/microsoft.asc`) and that `files/vitta/etc/yum.repos.d/vscode.repo` still resolves `code` with GPG checking enabled.
 - [ ] Verify the Docker CE and Tailscale Fedora repositories still return signed metadata and resolve their Vitta package sets; do not replace their package-managed keys or repositories with unpinned downloads.

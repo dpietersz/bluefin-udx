@@ -13,7 +13,7 @@ This repository builds [bootc](https://containers.github.io/bootc/) images for m
 - **T580** (Intel iGPU only) — `ghcr.io/dpietersz/vitta:stable`; Bluefin UDX remains the rollback image.
 - **P14s Gen5 i7** (Intel + NVIDIA RTX) — `ghcr.io/dpietersz/bluefin-udx-nvidia:stable`; `ghcr.io/dpietersz/vitta-nvidia:testing` is available for owner-approved testing only.
 
-[Vitta](#vitta-stable--t580-first) is a personal, GNOME-free niri desktop on Universal Blue's desktop-less `base-main:44`. It reuses the shared UDX module set and adds the desktop plumbing Bluefin DX supplied; CI publishes `:testing`, date, and commit-SHA tags, while `:stable` advances only through an owner-triggered promotion.
+[Vitta](#vitta-stable--t580-first) is a personal, GNOME-free niri desktop on Universal Blue's desktop-less `base-main:44`. It reuses the shared UDX module set and adds the desktop plumbing Bluefin DX supplied; `vitta-nvidia` adds the NVIDIA open driver through BlueBuild's akmods module rather than a separate NVIDIA base. CI publishes `:testing`, date, and commit-SHA tags, while `:stable` advances only through an owner-triggered promotion.
 
 It is **not** a community distro. It is **not** seeking users or contributors. It exists because:
 

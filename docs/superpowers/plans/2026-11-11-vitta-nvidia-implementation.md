@@ -22,6 +22,8 @@
 
 ## Global Constraints
 
+> **R42/R43 (2026-11-11):** `vitta-nvidia` uses `ghcr.io/ublue-os/base-main:44` with BlueBuild `akmods` `nvidia-driver: nvidia-open`; it has no own kargs file because that module writes the four arguments. These rulings supersede the `base-nvidia` and `files/vitta-nvidia/` kargs lines below.
+
 - Image name `vitta-nvidia`; base `ghcr.io/ublue-os/base-nvidia`, `image-version: 44`; os-release `ID=vitta`, `ID_LIKE=fedora`, `NAME="Vitta"`, `PRETTY_NAME="Vitta 44 (NVIDIA)"`, `VARIANT_ID=vitta-nvidia`, `IMAGE_ID=vitta-nvidia` (D1).
 - Kernel args, exactly and in this order: `rd.driver.blacklist=nouveau`, `modprobe.blacklist=nouveau`, `nvidia-drm.modeset=1`, `initcall_blacklist=simpledrm_platform_driver_init`.
 - `bluefin-udx`, `bluefin-udx-nvidia` and their CI behaviour stay unchanged (D5). `files/system/` gets nothing new. Shared Vitta files: `files/vitta/` + `recipes/vitta-modules.yml`. NVIDIA-only files: `files/vitta-nvidia/`, applied only by `recipes/vitta-nvidia.yml`.
