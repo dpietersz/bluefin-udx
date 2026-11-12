@@ -121,8 +121,8 @@ CI publishes Vitta only as `:testing`, date, and commit-SHA tags. To deliberatel
 
 ```bash
 gh workflow run promote-vitta.yml -f source=testing -f confirm=promote
-# Promote the reviewed NVIDIA testing image instead:
-gh workflow run promote-vitta.yml -f image=vitta-nvidia -f source=testing -f confirm=promote
+# Promote a recorded NVIDIA digest instead; never use its mutable testing tag:
+gh workflow run promote-vitta.yml -f image=vitta-nvidia -f source=sha256:<recorded-digest> -f confirm=promote
 ```
 
 The promotion workflow resolves the source to its registry digest, verifies its cosign signature, retags that exact digest as `:stable`, and verifies the stable reference. It is never run by `build.yml`. See the [design](docs/superpowers/specs/2026-11-06-vitta-design.md) and [implementation plan](docs/superpowers/plans/2026-11-06-vitta.md).
