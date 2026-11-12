@@ -78,6 +78,7 @@ ShellRoot {
             // bridge-ok runs without VITTA_GREETER_SELFTEST_NO_QUIT: the bridge
             // quits the greeter right after this signal, so judge now.
             if (root.scenarioName === "bridge-ok") root.bridgeOkLaunched();
+            else if (root.scenarioName === "bridge-escape-late") root.bridgeEscapeLateLaunched();
         }
     }
 
@@ -483,6 +484,80 @@ ShellRoot {
         });
     }
 
+    // The kind of the request GreetdBridge has on the wire ("" if none).
+    function outstanding() {
+        const sent = auth.backend.sent || [];
+        return sent.length === 1 ? sent[0].kind : "";
+    }
+
+    function bridgeIdle() {
+        return (auth.backend.sent || []).length === 0 && (auth.backend.waiting || []).length === 0;
+    }
+
+    // Escape while greetd checks a right password (fake: delayed replies):
+    // greetd's success to that check must not launch the session.
+    function runBridgeEscape() {
+        submitWith(rightPassword);
+        waitFor(() => outstanding() === "respond", "the password check to be on the wire", () => {
+            card.cancel();   // what Escape does
+            check(!auth.busy && auth.awaiting === "", "Escape resets the attempt");
+            check(pass.text === "" && pass.input.activeFocus, "password cleared and focused");
+            waitFor(() => bridgeIdle(), "the cancelled check and the cancel to be answered", () => {
+                check(launchCount === 0, "nothing launched after Escape");
+                check(card.status === "" && !card.statusError, "no error shown after Escape");
+                check(failedCount === 0 && errorNotices().length === 0, "no failure reported after Escape");
+                submitWith(rightPassword);
+                check(auth.busy, "the second attempt starts");
+                waitFor(() => launchCount > 0, "launch after the second attempt", () => {
+                    expectBridgeLaunch(0);
+                    finish();
+                });
+            });
+        });
+    }
+
+    // Escape once start_session is on the wire (fake: delayed replies): greetd
+    // has scheduled the session, so the launch completes and the greeter
+    // quits (no NO_QUIT switch here); no cancel_session follows start.
+    function runBridgeEscapeLate() {
+        submitWith(rightPassword);
+        waitFor(() => outstanding() === "start", "start_session to be on the wire", () => {
+            card.cancel();
+            check(!auth.busy, "Escape resets the screen");
+            check(outstanding() === "start" && (auth.backend.waiting || []).length === 0,
+                  "start_session is still awaited, nothing queued behind it");
+            // The verdict is printed from onLaunched; this only catches a hang.
+            waitFor(() => false, "launch after Escape", () => {});
+        });
+    }
+
+    function bridgeEscapeLateLaunched() {
+        check(launchCount === 1, "launched exactly once");
+        check(failedCount === 0 && errorNotices().length === 0, "no failure reported");
+        report();
+        quitGuard.start();
+    }
+
+    // Wrong password against a greetd that answers the greeter's cancel with
+    // the error real greetd 0.10.3 sends ("Connection refused"): the
+    // authentication failure stays shown, then the right password logs in.
+    function runBridgeRefused() {
+        submitWith(wrongPassword);
+        check(auth.busy, "submit starts an attempt");
+        waitFor(() => !auth.busy, "the failed attempt to end", () => {
+            waitFor(() => bridgeIdle(), "the reply to the cancel", () => {
+                expectBridgeFailure("Authentication failed");
+                check(errorNotices().length === 0, "no second error line");
+                submitWith(rightPassword);
+                check(auth.busy, "the retry starts an attempt");
+                waitFor(() => launchCount > 0, "launch after the retry", () => {
+                    expectBridgeLaunch(1);
+                    finish();
+                });
+            });
+        });
+    }
+
     // greetd closes the connection mid-login: error shown, not busy; once
     // greetd is back a new attempt (with a fresh helper) logs in.
     function runBridgeDied() {
@@ -513,6 +588,9 @@ ShellRoot {
         case "bridge-info": runBridgeInfo(); break;
         case "bridge-multiprompt": runBridgeMultiprompt(); break;
         case "bridge-died": runBridgeDied(); break;
+        case "bridge-escape": runBridgeEscape(); break;
+        case "bridge-escape-late": runBridgeEscapeLate(); break;
+        case "bridge-refused": runBridgeRefused(); break;
         default:
             check(false, "unknown bridge scenario");
             finish();

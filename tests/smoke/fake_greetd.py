@@ -12,6 +12,13 @@ import time
 
 
 PAUSE = 0.05
+# What greetd 0.10.3 answers to cancel_session once PAM's worker is gone,
+# e.g. right after an auth_error.
+CANCEL_ERROR = {
+    "type": "error",
+    "error_type": "error",
+    "description": "unable to send message: Connection refused (os error 111)",
+}
 
 
 def frame(message):
@@ -105,7 +112,8 @@ def serve_client(connection, args, password, log, deadline):
             return
         request_type = request.get("type")
         if request_type == "cancel_session":
-            send_reply(connection, {"type": "success"}, args.script == "split", args.script == "delayed")
+            send_reply(connection, CANCEL_ERROR if args.cancel_error else {"type": "success"},
+                       args.script == "split", args.script == "delayed")
             phase = "new"
         elif request_type == "start_session":
             send_reply(connection, {"type": "success"}, args.script == "split", args.script == "delayed")
@@ -172,6 +180,7 @@ def parse_args():
     )
     parser.add_argument("--password-file")
     parser.add_argument("--keep", action="store_true")
+    parser.add_argument("--cancel-error", action="store_true", help="answer cancel_session as greetd 0.10.3 does after a failed login")
     parser.add_argument("--timeout", type=float, default=30)
     return parser.parse_args()
 

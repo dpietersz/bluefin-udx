@@ -6,7 +6,8 @@
 # Usage: vitta-greeter-preview [--mode light|dark] [--scenario ok|badpass|multiprompt|error] [--selftest]
 #   --mode      pin the palette (default: whatever `vitta-theme mode` says)
 #   --scenario  fake greetd behaviour (default: ok); with --selftest also one of
-#               bridge-ok|bridge-badpass|bridge-split|bridge-info|bridge-multiprompt|bridge-died
+#               bridge-ok|bridge-badpass|bridge-split|bridge-info|bridge-multiprompt|bridge-died|
+#               bridge-escape|bridge-escape-late|bridge-refused
 #   --selftest  no window: run selftest.qml offscreen for the scenario (default:
 #               all four, the edge-to-edge check inside headless cage with the
 #               launcher's cage flags, then the bridge group), exit non-zero if
@@ -19,7 +20,7 @@
 set -euo pipefail
 
 usage() {
-    sed -n "6,18p" "$0" | sed "s/^# \{0,1\}//"
+    sed -n "6,19p" "$0" | sed "s/^# \{0,1\}//"
     exit "${1:-0}"
 }
 
@@ -36,10 +37,12 @@ while [ $# -gt 0 ]; do
     esac
 done
 case "$MODE" in ""|light|dark) ;; *) echo "vitta-greeter-preview: --mode must be light or dark" >&2; exit 2 ;; esac
-BRIDGE_SCENARIOS="bridge-ok bridge-badpass bridge-split bridge-info bridge-multiprompt bridge-died"
+BRIDGE_SCENARIOS="bridge-ok bridge-badpass bridge-split bridge-info bridge-multiprompt bridge-died
+    bridge-escape bridge-escape-late bridge-refused"
 case "$SCENARIO" in
     ""|ok|badpass|multiprompt|error) ;;
-    bridge-ok|bridge-badpass|bridge-split|bridge-info|bridge-multiprompt|bridge-died)
+    bridge-ok|bridge-badpass|bridge-split|bridge-info|bridge-multiprompt|bridge-died|\
+    bridge-escape|bridge-escape-late|bridge-refused)
         if [ "$SELFTEST" != 1 ]; then
             echo "vitta-greeter-preview: $SCENARIO needs --selftest" >&2
             exit 2
@@ -136,14 +139,14 @@ fi
 # judged from the selftest's verdict and from the fake's request log. That log
 # holds no password: fake_greetd.py records its length and whether it matched.
 
-# start_fake SOCKET SCRIPT: start fake greetd in the background (FAKE_PID) and
+# start_fake SOCKET SCRIPT [FAKE_ARGS...]: start fake greetd in the background (FAKE_PID) and
 # wait for its READY line; the fifo read ends at READY, at EOF or after 10 s.
 # Not to be run in a subshell: it records the pid. On failure FAKE_ERR says why.
 start_fake() {
     local line=""
     rm -f "$1.ready"
     mkfifo "$1.ready"
-    python3 "$VITTA_FAKE_GREETD" --socket "$1" --script "$2" --timeout 60 >"$1.ready" 2>"$1.err" &
+    python3 "$VITTA_FAKE_GREETD" --socket "$1" --script "$2" --timeout 60 "${@:3}" >"$1.ready" 2>"$1.err" &
     FAKE_PID=$!
     BG_PIDS="$BG_PIDS $FAKE_PID"
     if read -r -t 10 line <"$1.ready" && [ "$line" = READY ]; then
@@ -176,6 +179,9 @@ expected = {
     "bridge-info": ([create, right, ack, start], None),
     "bridge-multiprompt": ([create, cancel, create, code, right, start], None),
     "bridge-died": ([create, right, start], [create, right]),
+    "bridge-escape": ([create, right, cancel, create, right, start], None),
+    "bridge-escape-late": ([create, right, start], None),
+    "bridge-refused": ([create, wrong, cancel, create, right, start], None),
 }[name]
 
 def read(path):
@@ -197,15 +203,20 @@ sys.exit(1 if bad else 0)
 
 run_bridge() {
     local name="$1" dir sock script qs_pid first_log="" reason="" out
-    # bridge-ok keeps the production path, where the bridge quits the greeter
-    # after start_session; the others stay up to check what follows.
-    local -a quit=(VITTA_GREETER_SELFTEST_NO_QUIT=1)
-    [ "$name" = bridge-ok ] && quit=()
+    # bridge-ok and bridge-escape-late keep the production path, where the
+    # bridge quits the greeter after start_session; the others stay up to
+    # check what follows.
+    local -a quit=(VITTA_GREETER_SELFTEST_NO_QUIT=1) fake_args=()
+    case "$name" in bridge-ok|bridge-escape-late) quit=() ;; esac
     script="${name#bridge-}"
-    [ "$name" = bridge-died ] && script=died
+    case "$name" in
+        bridge-escape|bridge-escape-late) script=delayed ;;
+        # greetd 0.10.3 answers the cancel after a failed login with an error.
+        bridge-refused) script=ok; fake_args=(--cancel-error) ;;
+    esac
     dir=$(mktemp -d "$STATE_DIR/b.XXXXXX")
     sock="$dir/s"
-    if ! start_fake "$sock" "$script"; then
+    if ! start_fake "$sock" "$script" "${fake_args[@]}"; then
         judge "$name" "$name" "" "$FAKE_ERR"
         return
     fi

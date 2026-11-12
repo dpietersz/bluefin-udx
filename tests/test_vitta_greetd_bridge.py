@@ -79,10 +79,11 @@ class VittaGreetdBridgeTests(unittest.TestCase):
                     stream.close()
         self.addCleanup(cleanup)
 
-    def start_server(self, script="ok", password_file=None):
+    def start_server(self, script="ok", password_file=None, extra=()):
         command = [sys.executable, "-B", str(FAKE), "--socket", str(self.socket_path), "--script", script, "--timeout", "8"]
         if password_file is not None:
             command.extend(["--password-file", str(password_file)])
+        command.extend(extra)
         self.server = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.addCleanupProcess("server")
         self.assertEqual(read_line(self.server.stdout), b"READY")
@@ -160,6 +161,20 @@ class VittaGreetdBridgeTests(unittest.TestCase):
         reply = self.authenticate("wrong")
         self.assertEqual((reply["type"], reply["error_type"]), ("error", "auth_error"))
         self.assertEqual(self.request({"type": "cancel_session"}), {"type": "success"})
+        self.assertEqual(self.close_bridge(), "")
+
+    def test_cancel_error_option_answers_cancel_like_real_greetd(self):
+        self.start_server("badpass", extra=["--cancel-error"])
+        self.start_bridge()
+        reply = self.authenticate("wrong")
+        self.assertEqual((reply["type"], reply["error_type"]), ("error", "auth_error"))
+        self.assertEqual(
+            self.request({"type": "cancel_session"}),
+            {"type": "error", "error_type": "error",
+             "description": "unable to send message: Connection refused (os error 111)"},
+        )
+        # The next attempt is unaffected.
+        self.assertEqual(self.authenticate(), {"type": "success"})
         self.assertEqual(self.close_bridge(), "")
 
     def test_special_characters_reach_greetd_unchanged(self):
