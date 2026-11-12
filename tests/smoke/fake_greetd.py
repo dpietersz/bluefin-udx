@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import select
 import socket
 import struct
 import time
@@ -74,6 +75,16 @@ def send_raw_reply(connection, body):
     connection.sendall(struct.pack("=I", len(body)) + body)
 
 
+def saw_early_bytes(connection):
+    ready, _, _ = select.select([connection], [], [], 0.5)
+    if not ready:
+        return False
+    try:
+        return bool(connection.recv(1, socket.MSG_PEEK))
+    except (BlockingIOError, socket.timeout):
+        return False
+
+
 def serve_client(connection, args, password, log, deadline):
     phase = "new"
     while True:
@@ -82,6 +93,9 @@ def serve_client(connection, args, password, log, deadline):
             return
         log.write(json.dumps(redact(request, password), ensure_ascii=False, separators=(",", ":")) + "\n")
         log.flush()
+        if args.script == "probe-early" and phase == "new":
+            log.write(json.dumps({"probe_early_bytes": saw_early_bytes(connection)}) + "\n")
+            log.flush()
         if args.script == "silent":
             time.sleep(max(0, deadline - time.monotonic()))
             return
@@ -146,7 +160,10 @@ def parse_args():
     parser.add_argument("--socket", required=True)
     parser.add_argument(
         "--script",
-        choices=("ok", "badpass", "multiprompt", "info", "split", "merged", "died", "silent", "delayed", "unicode", "surrogate"),
+        choices=(
+            "ok", "badpass", "multiprompt", "info", "split", "merged", "died", "silent", "delayed", "unicode",
+            "surrogate", "probe-early",
+        ),
         required=True,
     )
     parser.add_argument("--password-file")

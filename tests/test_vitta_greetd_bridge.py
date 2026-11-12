@@ -21,20 +21,6 @@ BRIDGE = ROOT / "files/vitta/usr/libexec/vitta/vitta-greetd-bridge"
 FAKE = ROOT / "tests/smoke/fake_greetd.py"
 
 
-class ChunkedSocket:
-    def __init__(self, chunks):
-        self.chunks = list(chunks)
-
-    def recv(self, count):
-        if not self.chunks:
-            return b""
-        chunk = self.chunks.pop(0)
-        if len(chunk) <= count:
-            return chunk
-        self.chunks.insert(0, chunk[count:])
-        return chunk[:count]
-
-
 def load_bridge_module():
     loader = importlib.machinery.SourceFileLoader("vitta_greetd_bridge", str(BRIDGE))
     spec = importlib.util.spec_from_loader(loader.name, loader)
@@ -221,17 +207,26 @@ class VittaGreetdBridgeTests(unittest.TestCase):
         self.assertEqual(self.bridge.wait(timeout=2), 0)
         self.assertFalse(password in self.bridge.stderr.read().decode(), "password leaked")
 
-    def test_receive_exact_handles_one_byte_chunks_and_peer_close(self):
+    def test_take_frame_handles_partial_and_merged_frames(self):
         bridge = load_bridge_module()
-        body = b'{"text":"caf\xc3\xa9"}'
-        header = struct.pack("=I", len(body))
-        peer = ChunkedSocket([bytes([byte]) for byte in header] + [body[:13], body[13:14], body[14:]])
-        self.assertEqual(bridge.receive_exact(peer, 4), header)
-        self.assertEqual(bridge.receive_exact(peer, len(body)), body)
-        truncated = ChunkedSocket([header, body[:-1]])
-        self.assertEqual(bridge.receive_exact(truncated, 4), header)
-        with self.assertRaises(bridge.PeerClosedError):
-            bridge.receive_exact(truncated, len(body))
+        first = b'{"text":"caf\xc3\xa9"}'
+        second = b'{"type":"success"}'
+        buffer = bytearray()
+        for byte in struct.pack("=I", len(first)) + first:
+            buffer.append(byte)
+            if len(buffer) < 4 + len(first):
+                self.assertIsNone(bridge.take_frame(buffer))
+        self.assertEqual(bridge.take_frame(buffer), first)
+        self.assertEqual(buffer, bytearray())
+
+        buffer.extend(struct.pack("=I", len(first)) + first + struct.pack("=I", len(second)) + second)
+        self.assertEqual(bridge.take_frame(buffer), first)
+        self.assertEqual(bridge.take_frame(buffer), second)
+        self.assertIsNone(bridge.take_frame(buffer))
+
+        buffer.extend(struct.pack("=I", bridge.MAX_REPLY + 1))
+        with self.assertRaises(ValueError):
+            bridge.take_frame(buffer)
 
     def test_silent_greetd_times_out(self):
         self.start_server("silent")
@@ -247,25 +242,45 @@ class VittaGreetdBridgeTests(unittest.TestCase):
         self.start_server("silent")
         self.start_bridge()
         self.bridge.stdin.write(b'{"type":"create_session"}\n')
+        self.bridge.stdin.flush()
+        self.wait_for_log_count(1)
         self.bridge.stdin.close()
         self.assertEqual(self.bridge.wait(timeout=2), 0)
         self.assertEqual(self.bridge.stdout.read(), b"")
         self.assertEqual(self.bridge.stderr.read().decode(), "")
 
-    def test_second_request_waits_for_first_reply(self):
-        self.start_server("delayed")
+    def test_queued_request_then_stdin_eof_exits_at_once(self):
+        self.start_server("silent")
         self.start_bridge()
         self.bridge.stdin.write(b'{"type":"create_session"}\n')
         self.bridge.stdin.flush()
         self.wait_for_log_count(1)
         self.bridge.stdin.write(b'{"type":"start_session"}\n')
+        self.bridge.stdin.close()
+        self.assertEqual(self.bridge.wait(timeout=2), 0)
+        self.assertEqual(self.bridge.stdout.read(), b"")
+        self.assertEqual(self.bridge.stderr.read().decode(), "")
+
+    def test_stdin_eof_after_complete_requests_keeps_their_replies(self):
+        self.start_server()
+        self.start_bridge()
+        self.bridge.stdin.write(b'{"type":"create_session"}\n{"type":"start_session"}\n')
+        self.bridge.stdin.close()
+        self.assertEqual(json.loads(read_line(self.bridge.stdout))["type"], "auth_message")
+        self.assertEqual(json.loads(read_line(self.bridge.stdout)), {"type": "success"})
+        self.assertEqual(self.bridge.wait(timeout=2), 0)
+        self.assertEqual(self.bridge.stderr.read().decode(), "")
+
+    def test_second_request_is_not_forwarded_before_first_reply(self):
+        self.start_server("probe-early")
+        self.start_bridge()
+        self.bridge.stdin.write(b'{"type":"create_session"}\n{"type":"start_session"}\n')
         self.bridge.stdin.flush()
-        time.sleep(0.1)
-        self.assertEqual(len(self.log()), 1)
         self.assertEqual(json.loads(read_line(self.bridge.stdout))["type"], "auth_message")
         self.wait_for_log_count(2)
+        self.assertEqual(self.log()[1], {"probe_early_bytes": False})
         self.assertEqual(json.loads(read_line(self.bridge.stdout)), {"type": "success"})
-        self.assertEqual([entry["type"] for entry in self.log()], ["create_session", "start_session"])
+        self.assertEqual([entry["type"] for entry in self.log() if "type" in entry], ["create_session", "start_session"])
         self.assertEqual(self.close_bridge(), "")
 
     def test_lone_surrogate_input_is_refused_and_next_request_works(self):
