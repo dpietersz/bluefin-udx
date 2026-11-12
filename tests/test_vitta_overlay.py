@@ -159,6 +159,24 @@ class VittaOverlayTests(unittest.TestCase):
         self.assertIn("vitta-greeter-preview: selftest bridge SKIPPED (VITTA_FAKE_GREETD not set)", preview)
         self.assertIn("VITTA_GREETD_BRIDGE=", preview)
 
+    def test_gates_run_bridge_selftest(self):
+        preview = (VITTA / "usr/bin/vitta-greeter-preview").read_text()
+        bridge_scenarios = re.search(r'BRIDGE_SCENARIOS="([^"]+)"', preview, re.DOTALL)
+        preview_scenarios = re.search(r'PREVIEW_SCENARIOS="\$\{SCENARIO:-([^}]+)\}"', preview)
+        self.assertIsNotNone(bridge_scenarios)
+        self.assertIsNotNone(preview_scenarios)
+        expected = preview_scenarios.group(1).split() + bridge_scenarios.group(1).split()
+
+        for gate_path in (ROOT / ".github/workflows/build.yml", ROOT / "scripts/local-build-test.sh"):
+            gate = gate_path.read_text()
+            self.assertIn("[ -x /usr/libexec/vitta/vitta-greetd-bridge ]", gate)
+            self.assertIn("check_file /usr/share/vitta/greeter/GreetdBridge.qml", gate)
+            self.assertIn("VITTA_FAKE_GREETD=/smoke/fake_greetd.py timeout -k 10 180", gate)
+            self.assertIn('grep -qF "selftest bridge SKIPPED"', gate)
+            scenarios = re.search(r'VITTA_SELFTEST_SCENARIOS="([^"]+)"', gate, re.DOTALL)
+            self.assertIsNotNone(scenarios, gate_path)
+            self.assertEqual(scenarios.group(1).split(), expected, gate_path)
+
     def test_tmpfiles_recreates_greeter_portal_mask(self):
         # greetd's %post mask lives in the image /var, which a rebase never applies.
         lines = [

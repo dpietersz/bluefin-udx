@@ -623,6 +623,11 @@ jobs:
                 # ostree populates /var only on first deploy; a rebased machine needs tmpfiles.
                 if grep -Eqs "^d[[:space:]]+/var/lib/greetd[[:space:]]" /usr/lib/tmpfiles.d/*.conf; then echo "  ok    /var/lib/greetd created by tmpfiles.d"; else echo "  FAIL  no tmpfiles.d d-line creates /var/lib/greetd"; FAIL=1; fi
                 if [ -x /usr/libexec/vitta/vitta-greeter ]; then echo "  ok    /usr/libexec/vitta/vitta-greeter executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greeter missing or not executable"; FAIL=1; fi
+                if [ -x /usr/libexec/vitta/vitta-greetd-bridge ]; then echo "  ok    /usr/libexec/vitta/vitta-greetd-bridge executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greetd-bridge missing or not executable"; FAIL=1; fi
+                check_file /usr/share/vitta/greeter/GreetdBridge.qml
+                if python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" /usr/libexec/vitta/vitta-greetd-bridge; then echo "  ok    vitta-greetd-bridge parses as Python"; else echo "  FAIL  vitta-greetd-bridge does not parse as Python"; FAIL=1; fi
+                VITTA_GREETD_IMPORTS=$(grep -rl "Quickshell.Services.Greetd" /usr/share/vitta/greeter 2>/dev/null || true)
+                if [ -z "$VITTA_GREETD_IMPORTS" ]; then echo "  ok    greeter does not import Quickshell.Services.Greetd"; else echo "  FAIL  greeter imports Quickshell.Services.Greetd: $VITTA_GREETD_IMPORTS"; FAIL=1; fi
                 if [ -x /usr/libexec/vitta/vitta-greeter-gpu ]; then echo "  ok    /usr/libexec/vitta/vitta-greeter-gpu executable"; else echo "  FAIL  /usr/libexec/vitta/vitta-greeter-gpu missing or not executable"; FAIL=1; fi
                 if grep -Fq "WLR_DRM_DEVICES" /usr/libexec/vitta/vitta-greeter; then echo "  ok    vitta-greeter accepts the panel GPU hint"; else echo "  FAIL  vitta-greeter does not accept the panel GPU hint"; FAIL=1; fi
                 VITTA_GREETER_GPU=""
@@ -681,11 +686,25 @@ jobs:
                 else
                     echo "  FAIL  greeter launch call lacks the R14 session environment: ${VITTA_LAUNCH:-none}"; FAIL=1
                 fi
-                # Behavioural: drive ok/badpass/multiprompt/error through the preview backend
-                # headless (red status, cancellation, cleared + refocused password, launch env), then
-                # rerun under headless cage with the launcher flags: the window must cover the output.
-                if VITTA_SELFTEST_LOG=$(vitta-greeter-preview --selftest 2>&1); then
-                    echo "  ok    greeter selftest: ok badpass multiprompt error, edge to edge in headless cage"
+                # Behavioural: drive the preview and bridge scenarios headless, then rerun under
+                # headless cage with the launcher flags: the window must cover the output.
+                VITTA_SELFTEST_SCENARIOS="ok badpass multiprompt error bridge-ok bridge-badpass bridge-split bridge-info bridge-multiprompt bridge-died bridge-escape bridge-escape-late bridge-refused"
+                if VITTA_SELFTEST_LOG=$(VITTA_FAKE_GREETD=/smoke/fake_greetd.py timeout -k 10 180 vitta-greeter-preview --selftest 2>&1); then
+                    if printf "%s\n" "$VITTA_SELFTEST_LOG" | grep -qF "selftest bridge SKIPPED"; then
+                        echo "  FAIL  greeter selftest bridge scenarios were skipped"; FAIL=1
+                    else
+                        VITTA_SELFTEST_MISSING=""
+                        for VITTA_SELFTEST_SCENARIO in $VITTA_SELFTEST_SCENARIOS; do
+                            if ! printf "%s\n" "$VITTA_SELFTEST_LOG" | grep -qF "vitta-greeter-preview: selftest $VITTA_SELFTEST_SCENARIO passed"; then
+                                VITTA_SELFTEST_MISSING="$VITTA_SELFTEST_MISSING $VITTA_SELFTEST_SCENARIO"
+                            fi
+                        done
+                        if [ -z "$VITTA_SELFTEST_MISSING" ]; then
+                            echo "  ok    greeter selftest: 13 scenarios (bridge scenarios ran), edge to edge in headless cage"
+                        else
+                            echo "  FAIL  greeter selftest scenarios missing PASS:$VITTA_SELFTEST_MISSING"; FAIL=1
+                        fi
+                    fi
                 else
                     echo "  FAIL  greeter selftest:"; printf "%s\n" "$VITTA_SELFTEST_LOG" | grep -E "FAIL|FAILED|^    " | tail -n 30 | sed "s/^/          /"; FAIL=1
                 fi
