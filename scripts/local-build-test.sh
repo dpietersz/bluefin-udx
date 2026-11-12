@@ -868,6 +868,10 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" -v "$REPO_ROOT/tests/smoke:/smoke:ro
     if [ "$IS_VITTA" = 1 ] && [ "$IS_NVIDIA" = 1 ]; then
         echo "Vitta NVIDIA boot integration:"
         for p in kmod-nvidia nvidia-driver nvidia-container-toolkit; do check_rpm "$p"; done
+        check_rpm libva-nvidia-driver
+        check_rpm nvidia-driver-cuda
+        check_rpm nvidia-persistenced
+        check_rpm egl-wayland
         NVIDIA_MODULE_DIR_COUNT=$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d | wc -l)
         if [ "$NVIDIA_MODULE_DIR_COUNT" -eq 1 ]; then
             echo "  ok    one kernel module directory"
@@ -884,7 +888,8 @@ $RUNNER run --rm -e "RECIPE_NAME=${RECIPE}" -v "$REPO_ROOT/tests/smoke:/smoke:ro
         fi
         check_file /usr/lib/bootc/kargs.d/00-bluebuild-nvidia-kargs.toml
         for NVIDIA_KARG in rd.driver.blacklist=nouveau modprobe.blacklist=nouveau nvidia-drm.modeset=1 initcall_blacklist=simpledrm_platform_driver_init; do
-            NVIDIA_KARG_COUNT=$(grep -rhoFo -- "$NVIDIA_KARG" /usr/lib/bootc/kargs.d/*.toml 2>/dev/null | wc -l || true)
+            NVIDIA_KARG_PATTERN="\"$NVIDIA_KARG\""
+            NVIDIA_KARG_COUNT=$(grep -rhoF -- "$NVIDIA_KARG_PATTERN" /usr/lib/bootc/kargs.d/*.toml 2>/dev/null | wc -l || true)
             if [ "$NVIDIA_KARG_COUNT" -eq 1 ]; then
                 echo "  ok    NVIDIA karg once: $NVIDIA_KARG"
             else

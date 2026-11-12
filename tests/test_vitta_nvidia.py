@@ -163,6 +163,19 @@ class VittaNvidiaCiTests(unittest.TestCase):
             f"variables used before assignment: {sorted(variables - assigned_before_run)}",
         )
 
+    def test_vitta_nvidia_gate_package_parity(self):
+        expected = (
+            "check_rpm libva-nvidia-driver",
+            "check_rpm nvidia-driver-cuda",
+            "check_rpm nvidia-persistenced",
+            "check_rpm egl-wayland",
+        )
+        for gate in (self.BUILD_WORKFLOW, self.LOCAL_GATE):
+            with self.subTest(gate=gate.name):
+                text = gate.read_text()
+                for line in expected:
+                    self.assertIn(line, text)
+
     def test_nvidia_kargs_come_from_akmods_module(self):
         for gate in (self.BUILD_WORKFLOW, self.LOCAL_GATE):
             with self.subTest(gate=gate):
