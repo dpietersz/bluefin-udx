@@ -5,16 +5,21 @@
 #
 # Usage: vitta-greeter-preview [--mode light|dark] [--scenario ok|badpass|multiprompt|error] [--selftest]
 #   --mode      pin the palette (default: whatever `vitta-theme mode` says)
-#   --scenario  fake greetd behaviour (default: ok)
+#   --scenario  fake greetd behaviour (default: ok); with --selftest also one of
+#               bridge-ok|bridge-badpass|bridge-split|bridge-info|bridge-multiprompt|bridge-died
 #   --selftest  no window: run selftest.qml offscreen for the scenario (default:
-#               all four, then the edge-to-edge check inside headless cage with
-#               the launcher's cage flags), exit non-zero if any check fails
+#               all four, the edge-to-edge check inside headless cage with the
+#               launcher's cage flags, then the bridge group), exit non-zero if
+#               any check fails
 # VITTA_ROOT=<dir> runs the QML from <dir>/usr/share/vitta/greeter instead of
 # the installed copy, e.g. VITTA_ROOT=$PWD/files/vitta from the repo.
+# VITTA_FAKE_GREETD=<fake_greetd.py> enables the bridge group of --selftest: the
+# real Auth.qml, GreetdBridge.qml and vitta-greetd-bridge against that fake
+# greetd (tests/smoke/fake_greetd.py). Without it the group is skipped.
 set -euo pipefail
 
 usage() {
-    sed -n "6,13p" "$0" | sed "s/^# \{0,1\}//"
+    sed -n "6,18p" "$0" | sed "s/^# \{0,1\}//"
     exit "${1:-0}"
 }
 
@@ -31,7 +36,16 @@ while [ $# -gt 0 ]; do
     esac
 done
 case "$MODE" in ""|light|dark) ;; *) echo "vitta-greeter-preview: --mode must be light or dark" >&2; exit 2 ;; esac
-case "$SCENARIO" in ""|ok|badpass|multiprompt|error) ;; *) echo "vitta-greeter-preview: unknown scenario: $SCENARIO" >&2; exit 2 ;; esac
+BRIDGE_SCENARIOS="bridge-ok bridge-badpass bridge-split bridge-info bridge-multiprompt bridge-died"
+case "$SCENARIO" in
+    ""|ok|badpass|multiprompt|error) ;;
+    bridge-ok|bridge-badpass|bridge-split|bridge-info|bridge-multiprompt|bridge-died)
+        if [ "$SELFTEST" != 1 ]; then
+            echo "vitta-greeter-preview: $SCENARIO needs --selftest" >&2
+            exit 2
+        fi ;;
+    *) echo "vitta-greeter-preview: unknown scenario: $SCENARIO" >&2; exit 2 ;;
+esac
 
 GREETER_DIR="${VITTA_ROOT:-}/usr/share/vitta/greeter"
 SHELL_QML="$GREETER_DIR/$([ "$SELFTEST" = 1 ] && echo selftest.qml || echo shell.qml)"
@@ -43,8 +57,16 @@ fi
 # Throwaway state dir, seeded with the current user, so the preview never
 # reads or writes greetd's /var/lib/greetd/vitta-last-user.
 STATE_DIR=$(mktemp -d -t vitta-greeter-preview.XXXXXX)
-trap 'rm -rf "$STATE_DIR"' EXIT
-printf "%s\n" "${USER:-$(id -un)}" > "$STATE_DIR/vitta-last-user"
+# Background processes of the bridge group (fake greetd, quickshell).
+BG_PIDS=""
+cleanup() {
+    # shellcheck disable=SC2086 # word list of pids
+    if [ -n "$BG_PIDS" ]; then kill $BG_PIDS 2>/dev/null || true; fi
+    rm -rf "$STATE_DIR"
+}
+trap cleanup EXIT
+LAST_USER="${USER:-$(id -un)}"
+printf "%s\n" "$LAST_USER" > "$STATE_DIR/vitta-last-user"
 
 # Never let the preview reach a real greetd socket.
 run_greeter() {
@@ -69,23 +91,26 @@ fi
 MODE="${MODE:-dark}"
 RC=0
 
-# judge NAME SCENARIO LOG: NAME passes only if LOG reports a PASS for SCENARIO
-# and Quickshell logged no QML errors. cage's own log lines ("00:00:00.012 [ERROR]
-# [xwayland/...]") are not QML errors and are left out of that scan.
+# judge NAME SCENARIO LOG [REASON]: NAME passes only if LOG reports a PASS for
+# SCENARIO, Quickshell logged no QML errors and no REASON to fail is given.
+# cage's own log lines ("00:00:00.012 [ERROR] [xwayland/...]") are not QML
+# errors and are left out of that scan.
 judge() {
     printf "%s\n" "$3" | grep -o "SELFTEST .*" || true
     BAD=$(printf "%s\n" "$3" | grep -Ev "^[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3} \[" \
         | grep -E "ERROR|Error:|TypeError|ReferenceError|is not a type|Cannot assign|Unable to assign|not installed|failed to load" || true)
-    if printf "%s\n" "$3" | grep -q "SELFTEST RESULT PASS $2 " && [ -z "$BAD" ]; then
+    if printf "%s\n" "$3" | grep -q "SELFTEST RESULT PASS $2 " && [ -z "$BAD" ] && [ -z "${4:-}" ]; then
         echo "vitta-greeter-preview: selftest $1 passed"
     else
         echo "vitta-greeter-preview: selftest $1 FAILED" >&2
         [ -n "$BAD" ] && printf "%s\n" "$BAD" | sed "s/^/    /" >&2
+        [ -n "${4:-}" ] && printf "%s\n" "$4" | sed "s/^/    /" >&2
         RC=1
     fi
 }
 
-for S in ${SCENARIO:-ok badpass multiprompt error}; do
+case "$SCENARIO" in bridge-*) PREVIEW_SCENARIOS="" ;; *) PREVIEW_SCENARIOS="${SCENARIO:-ok badpass multiprompt error}" ;; esac
+for S in $PREVIEW_SCENARIOS; do
     judge "$S" "$S" "$(run_greeter "$S" QT_QPA_PLATFORM=offscreen timeout 30 quickshell -p "$SHELL_QML" 2>&1 || true)"
 done
 
@@ -103,6 +128,143 @@ if [ -z "$SCENARIO" ]; then
         # shellcheck disable=SC2086 # CAGE_FLAGS is the launcher's word list
         judge cage ok "$(run_greeter ok VITTA_GREETER_SELFTEST_CAGE=1 WLR_BACKENDS=headless WLR_RENDERER=pixman \
             QT_QPA_PLATFORM=wayland QT_QUICK_BACKEND=software timeout 30 cage $CAGE_FLAGS -- quickshell -p "$SHELL_QML" 2>&1 || true)"
+    fi
+fi
+
+# Bridge group: the real Auth.qml + GreetdBridge.qml + vitta-greetd-bridge
+# (no preview backend) against fake_greetd.py on a fresh socket per scenario,
+# judged from the selftest's verdict and from the fake's request log. That log
+# holds no password: fake_greetd.py records its length and whether it matched.
+
+# start_fake SOCKET SCRIPT: start fake greetd in the background (FAKE_PID) and
+# wait for its READY line; the fifo read ends at READY, at EOF or after 10 s.
+# Not to be run in a subshell: it records the pid. On failure FAKE_ERR says why.
+start_fake() {
+    local line=""
+    rm -f "$1.ready"
+    mkfifo "$1.ready"
+    python3 "$VITTA_FAKE_GREETD" --socket "$1" --script "$2" --timeout 60 >"$1.ready" 2>"$1.err" &
+    FAKE_PID=$!
+    BG_PIDS="$BG_PIDS $FAKE_PID"
+    if read -r -t 10 line <"$1.ready" && [ "$line" = READY ]; then
+        return 0
+    fi
+    FAKE_ERR="fake greetd ($2) did not report READY: $(head -c 400 "$1.err" 2>/dev/null || true)"
+    return 1
+}
+
+# check_bridge_log NAME LOG [FIRST_LOG]: greetd got exactly these requests, in
+# order; prints what differs.
+check_bridge_log() {
+    python3 -c '
+import json, sys
+
+user, name, log = sys.argv[1:4]
+first = sys.argv[4] if len(sys.argv) > 4 else ""
+create = {"type": "create_session", "username": user}
+right = {"type": "post_auth_message_response", "response_len": 5, "response_ok": True}
+wrong = {"type": "post_auth_message_response", "response_len": 5, "response_ok": False}
+code = {"type": "post_auth_message_response", "response_len": 6, "response_ok": False}
+ack = {"type": "post_auth_message_response"}
+cancel = {"type": "cancel_session"}
+start = {"type": "start_session", "cmd": ["niri-session"],
+         "env": ["XDG_SESSION_TYPE=wayland", "XDG_SESSION_DESKTOP=niri", "XDG_CURRENT_DESKTOP=niri:GNOME"]}
+expected = {
+    "bridge-ok": ([create, right, start], None),
+    "bridge-badpass": ([create, wrong, cancel, create, right, start], None),
+    "bridge-split": ([create, wrong, cancel, create, right, start], None),
+    "bridge-info": ([create, right, ack, start], None),
+    "bridge-multiprompt": ([create, cancel, create, code, right, start], None),
+    "bridge-died": ([create, right, start], [create, right]),
+}[name]
+
+def read(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return [json.loads(line) for line in handle if line.strip()]
+    except (OSError, ValueError) as error:
+        return "unreadable (%s)" % type(error).__name__
+
+bad = []
+if expected[1] is not None and read(first) != expected[1]:
+    bad.append("first fake greetd got %s, expected %s" % (json.dumps(read(first)), json.dumps(expected[1])))
+if read(log) != expected[0]:
+    bad.append("fake greetd got %s, expected %s" % (json.dumps(read(log)), json.dumps(expected[0])))
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$LAST_USER" "$@"
+}
+
+run_bridge() {
+    local name="$1" dir sock script qs_pid first_log="" reason="" out
+    # bridge-ok keeps the production path, where the bridge quits the greeter
+    # after start_session; the others stay up to check what follows.
+    local -a quit=(VITTA_GREETER_SELFTEST_NO_QUIT=1)
+    [ "$name" = bridge-ok ] && quit=()
+    script="${name#bridge-}"
+    [ "$name" = bridge-died ] && script=died
+    dir=$(mktemp -d "$STATE_DIR/b.XXXXXX")
+    sock="$dir/s"
+    if ! start_fake "$sock" "$script"; then
+        judge "$name" "$name" "" "$FAKE_ERR"
+        return
+    fi
+    env -u VITTA_GREETER_PREVIEW -u VITTA_GREETER_SCENARIO \
+        GREETD_SOCK="$sock" \
+        VITTA_GREETD_BRIDGE="$BRIDGE_HELPER" \
+        VITTA_GREETER_SELFTEST_BRIDGE="$name" \
+        VITTA_GREETER_SELFTEST_MARKER="$dir/restarted" \
+        VITTA_GREETER_MODE="$MODE" \
+        VITTA_GREETER_STATE_DIR="$STATE_DIR" \
+        "${quit[@]}" \
+        QT_QPA_PLATFORM=offscreen timeout 30 quickshell -p "$SHELL_QML" >"$dir/out" 2>&1 &
+    qs_pid=$!
+    BG_PIDS="$BG_PIDS $qs_pid"
+    if [ "$name" = bridge-died ]; then
+        # The first fake exits after closing the connection; greetd then
+        # "comes back" on the same socket and the selftest logs in again.
+        if timeout 20 tail --pid="$FAKE_PID" -f /dev/null; then
+            first_log="$dir/s.log.first"
+            mv "$sock.log" "$first_log"
+            if start_fake "$sock" ok; then
+                printf "ready\n" >"$dir/restarted"
+            else
+                reason="$FAKE_ERR"
+            fi
+        else
+            reason="the first fake greetd did not exit after closing the connection"
+        fi
+    fi
+    wait "$qs_pid" || true
+    # The fake exits once the helper's connection closes with quickshell.
+    timeout 10 tail --pid="$FAKE_PID" -f /dev/null || kill "$FAKE_PID" 2>/dev/null || true
+    out=$(cat "$dir/out")
+    if [ -z "$reason" ] && printf "%s\n" "$out" | grep -q "SELFTEST FAIL"; then
+        reason="a SELFTEST FAIL line was printed"
+    fi
+    if [ -z "$reason" ]; then
+        reason=$(check_bridge_log "$name" "$sock.log" ${first_log:+"$first_log"}) || true
+    fi
+    judge "$name" "$name" "$out" "$reason"
+}
+
+case "$SCENARIO" in "") BRIDGE_RUN="$BRIDGE_SCENARIOS" ;; bridge-*) BRIDGE_RUN="$SCENARIO" ;; *) BRIDGE_RUN="" ;; esac
+if [ -n "$BRIDGE_RUN" ]; then
+    BRIDGE_HELPER="${VITTA_ROOT:-}/usr/libexec/vitta/vitta-greetd-bridge"
+    if [ -z "${VITTA_FAKE_GREETD:-}" ]; then
+        if [ -n "$SCENARIO" ]; then
+            echo "vitta-greeter-preview: selftest $SCENARIO FAILED: needs VITTA_FAKE_GREETD=<fake_greetd.py>" >&2
+            RC=1
+        else
+            echo "vitta-greeter-preview: selftest bridge SKIPPED (VITTA_FAKE_GREETD not set)"
+        fi
+    elif [ ! -f "$VITTA_FAKE_GREETD" ] || [ ! -x "$BRIDGE_HELPER" ]; then
+        echo "vitta-greeter-preview: selftest bridge FAILED: needs $VITTA_FAKE_GREETD and an executable $BRIDGE_HELPER" >&2
+        RC=1
+    else
+        for S in $BRIDGE_RUN; do
+            run_bridge "$S"
+        done
     fi
 fi
 exit "$RC"

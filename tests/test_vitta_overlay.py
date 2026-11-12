@@ -132,6 +132,32 @@ class VittaOverlayTests(unittest.TestCase):
         self.assertIn('Quickshell.env("VITTA_GREETER_SELFTEST_CAGE")', selftest)
         self.assertIn("window.screen.width", selftest)
 
+    def test_auth_uses_the_bridge_backend(self):
+        # Quickshell's own greetd client lost its place on a reply in two parts
+        # (T580); the greeter talks to greetd through vitta-greetd-bridge.
+        greeter = VITTA / "usr/share/vitta/greeter"
+        for qml in sorted(greeter.glob("*.qml")):
+            self.assertNotIn("Quickshell.Services.Greetd", qml.read_text(), qml.name)
+        auth = (greeter / "Auth.qml").read_text()
+        self.assertIn("readonly property var backend: preview ? fake : bridge", auth)
+        self.assertIn("GreetdBridge {", auth)
+        self.assertIn(
+            'auth.backend.launch(["niri-session"], ["XDG_SESSION_TYPE=wayland", '
+            '"XDG_SESSION_DESKTOP=niri", "XDG_CURRENT_DESKTOP=niri:GNOME"], true);',
+            auth,
+        )
+        bridge = (greeter / "GreetdBridge.qml").read_text()
+        self.assertIn('"/usr/libexec/vitta/vitta-greetd-bridge"', bridge)
+        self.assertIn('Quickshell.env("VITTA_GREETD_BRIDGE")', bridge)
+
+    def test_preview_knows_bridge_scenarios(self):
+        preview = (VITTA / "usr/bin/vitta-greeter-preview").read_text()
+        for name in ("bridge-ok", "bridge-badpass", "bridge-split", "bridge-info",
+                     "bridge-multiprompt", "bridge-died"):
+            self.assertIn(name, preview)
+        self.assertIn("vitta-greeter-preview: selftest bridge SKIPPED (VITTA_FAKE_GREETD not set)", preview)
+        self.assertIn("VITTA_GREETD_BRIDGE=", preview)
+
     def test_tmpfiles_recreates_greeter_portal_mask(self):
         # greetd's %post mask lives in the image /var, which a rebase never applies.
         lines = [
