@@ -153,7 +153,8 @@ class VittaOverlayTests(unittest.TestCase):
     def test_preview_knows_bridge_scenarios(self):
         preview = (VITTA / "usr/bin/vitta-greeter-preview").read_text()
         for name in ("bridge-ok", "bridge-badpass", "bridge-split", "bridge-info",
-                     "bridge-multiprompt", "bridge-died"):
+                     "bridge-multiprompt", "bridge-died", "bridge-escape", "bridge-escape-late",
+                     "bridge-refused"):
             self.assertIn(name, preview)
         self.assertIn("vitta-greeter-preview: selftest bridge SKIPPED (VITTA_FAKE_GREETD not set)", preview)
         self.assertIn("VITTA_GREETD_BRIDGE=", preview)
