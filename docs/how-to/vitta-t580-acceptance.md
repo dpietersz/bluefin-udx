@@ -53,7 +53,7 @@ sudo systemctl reboot
 
 The first greetd boot exercises pieces no CI step can: `systemd-sysusers` creating the `greetd` user, the `/etc` merge pointing `display-manager.service` at `greetd.service`, logind seat access for cage, and SELinux for cage and Quickshell. If any of them fails, greetd restart-loops and VT1 stays blank.
 
-1. Press `Ctrl+Alt+F2` (or `Ctrl+Alt+F3`) for a text console; cage runs with `-s`, so VT switching works even while the greeter is up. Log in with the normal account.
+1. Press `Ctrl+Alt+F2` (or `Ctrl+Alt+F3`) for a text console; cage runs with `-s`, so VT switching works even while the greeter is up. Log in with the normal account. If the login screen stops reacting, recover with `Ctrl+Alt+F3`, log in, then run `sudo systemctl restart greetd`.
 2. Collect the evidence before changing anything, and record it in the check 1 or 2 notes:
 
    ```bash
@@ -85,7 +85,7 @@ At the switch reboot, enter the normal LUKS passphrase. The stock prompt must un
 
 ### 2. Greeter, login, and keyring
 
-At the greeter, compare its palette with the currently selected mode and with layout A (`docs/superpowers/specs/assets/vitta-login-layout-a.png`): there is no card or frame; four flat, touching bands (no bevel, shadow or gradient) run edge to edge across the screen a little above the middle, and the logo sits centred on them in a clean round gap. The clock and date are above the bands, the login and password fields and the `host · vitta <version>` line below; nothing overlaps the bands or the logo gap. Boot once docked (laptop plus external monitor) and once undocked: the login screen must fill exactly one screen, never straddling the seam. Type the user name and press `Tab`: focus must move to the password field (`Shift+Tab` goes back). Log in, then confirm the login keyring is unlocked and the greeter's user manager started. Open Teams and Storage Explorer; neither may request a separate keyring password.
+At the greeter, compare its palette with the currently selected mode and with layout A (`docs/superpowers/specs/assets/vitta-login-layout-a.png`): there is no card or frame; four flat, touching bands (no bevel, shadow or gradient) run edge to edge across the screen a little above the middle, and the logo sits centred on them in a clean round gap. The clock and date are above the bands, the login and password fields and the `host · vitta <version>` line below; nothing overlaps the bands or the logo gap. Boot once docked (laptop plus external monitor) and once undocked: the login screen must fill exactly one screen, never straddling the seam. Type the user name and press `Tab`: focus must move to the password field (`Shift+Tab` goes back). Type a wrong password twice in a row: each attempt must show the failure text within about 3 seconds and leave the fields usable; then the right password must log in. Confirm the login keyring is unlocked and the greeter's user manager started. Open Teams and Storage Explorer; neither may request a separate keyring password.
 
 ```bash
 vitta-theme mode

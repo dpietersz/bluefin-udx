@@ -151,8 +151,10 @@ sudo systemctl enable --now rpm-ostreed-automatic.timer
 
 At the greeter, confirm the bands and fields are edge to edge on the internal
 panel. Then repeat with the Thunderbolt dock connected and the lid closed; it
-must use one display rather than span a seam. Leave the greeter idle for five
-minutes; it must blank.
+must use one display rather than span a seam. Type a wrong password twice in a
+row: each attempt must show the failure text within about 3 seconds and leave
+the fields usable; then the right password must log in. Leave the greeter idle
+for five minutes; it must blank.
 
 ```bash
 /usr/libexec/vitta/vitta-greeter-gpu
@@ -372,9 +374,10 @@ sudo systemctl restart greetd
 journalctl -b -u greetd --no-pager
 ```
 
-Expected: the greeter returns and the journal captures the failure. Fedora's
-Quickshell build lacks two upstream greetd fixes; a rare loss of sync with
-this symptom is the known follow-up. Keep Fedora's package unless it happens.
+Expected: the greeter returns and the journal captures the failure. Since
+2026-11-12 the greeter uses its own greetd client; if the login screen ever
+stops reacting, recover with `Ctrl+Alt+F3`, log in, and run `sudo systemctl
+restart greetd`.
 
 > **Result:** [ ] Pass  [ ] Fail
 >
