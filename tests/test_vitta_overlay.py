@@ -147,6 +147,52 @@ class VittaOverlayTests(unittest.TestCase):
             lines,
         )
 
+    def test_greetd_auth_is_password_only(self):
+        pam = (VITTA / "etc/pam.d/greetd").read_text()
+        auth_lines = [line for line in pam.splitlines() if re.match(r"^-?auth\s", line)]
+        self.assertEqual(
+            auth_lines,
+            [
+                "auth       required    pam_env.so",
+                "auth       required    pam_faildelay.so delay=2000000",
+                "auth       required    pam_unix.so nullok",
+                "-auth      optional    pam_gnome_keyring.so",
+                "-auth      optional    pam_kwallet5.so",
+                "-auth      optional    pam_kwallet.so",
+                "auth       include     postlogin",
+            ],
+        )
+        self.assertNotRegex(pam, r"(?m)^-?auth\s+.*\b(?:system-auth|pam_fprintd|pam_exec|pam_echo)\b")
+        self.assertRegex(pam, r"(?m)^auth\s+required\s+pam_unix\.so\s+nullok$")
+
+    def test_greetd_other_sections_unchanged(self):
+        pam = (VITTA / "etc/pam.d/greetd").read_text()
+        lines = [
+            line
+            for line in pam.splitlines()
+            if re.match(r"^-?(account|password|session)\s", line)
+        ]
+        self.assertEqual(
+            lines,
+            [
+                "account    required    pam_sepermit.so",
+                "account    required    pam_nologin.so",
+                "account    include     system-auth",
+                "password   substack    system-auth",
+                "-password   optional    pam_gnome_keyring.so use_authtok",
+                "session    required    pam_selinux.so close",
+                "session    required    pam_loginuid.so",
+                "session    required    pam_selinux.so open",
+                "session    optional    pam_keyinit.so force revoke",
+                "session    required    pam_namespace.so",
+                "session    include     system-auth",
+                "-session    optional    pam_gnome_keyring.so auto_start",
+                "-session    optional    pam_kwallet5.so auto_start",
+                "-session    optional    pam_kwallet.so auto_start",
+                "session    include     postlogin",
+            ],
+        )
+
     def test_pam_password_substack_reaches_keyring(self):
         # `include` would inline pam_unix "sufficient" and end the stack before
         # the keyring line; gdm-password uses substack for the same reason.

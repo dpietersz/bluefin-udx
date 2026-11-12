@@ -72,6 +72,13 @@ class VittaNvidiaRecipeTests(unittest.TestCase):
     def test_no_cuda_toolkit(self):
         self.assertNotIn("- cuda-toolkit", self.recipe_text())
 
+    def test_fprintd_is_shared(self):
+        shared = (ROOT / "recipes/vitta-modules.yml").read_text()
+        for package in ("fprintd", "fprintd-pam"):
+            with self.subTest(package=package):
+                self.assertRegex(shared, rf"(?m)^\s+- {re.escape(package)}(\s+#.*)?$")
+                self.assertNotRegex(self.recipe_text(), rf"(?m)^\s+- {re.escape(package)}(\s+#.*)?$")
+
 
 class VittaNvidiaCiTests(unittest.TestCase):
     BUILD_WORKFLOW = ROOT / ".github/workflows/build.yml"
@@ -106,6 +113,33 @@ class VittaNvidiaCiTests(unittest.TestCase):
         self.assertNotIn("${{", run)
         body = run.split("-c '\n", 1)[1].rsplit("\n          '", 1)[0]
         self.assertNotIn("'", body)
+
+    def test_gates_probe_greetd_auth(self):
+        probes = (
+            'timeout -k 5 25 python3 /smoke/pam_probe.py greetd vittaprobe "$VITTA_PROBE_PW" --expect success --max-seconds 5',
+            'timeout -k 5 25 python3 /smoke/pam_probe.py greetd vittaprobe "wrong-$VITTA_PROBE_PW" --expect fail --max-seconds 10',
+            'timeout -k 5 25 python3 /smoke/pam_probe.py greetd vittaprobe "" --expect fail --max-seconds 10',
+            'grep -Ev "^-?auth[[:space:]].*(pam_gnome_keyring|pam_kwallet)" /etc/pam.d/greetd > /etc/pam.d/vittaprobe-nokeyring',
+            'timeout -k 5 25 python3 /smoke/pam_probe.py vittaprobe-nokeyring vittaprobe "$VITTA_PROBE_PW" --expect success --max-seconds 5',
+        )
+        for gate, mount in (
+            (self.BUILD_WORKFLOW, '-v "$GITHUB_WORKSPACE/tests/smoke:/smoke:ro"'),
+            (self.LOCAL_GATE, '-v "$REPO_ROOT/tests/smoke:/smoke:ro,z"'),
+        ):
+            text = gate.read_text()
+            with self.subTest(gate=gate.name):
+                self.assertIn(mount, text)
+                for probe in probes:
+                    self.assertIn(probe, text)
+                self.assertEqual(text.count("python3 /smoke/pam_probe.py"), 4)
+                self.assertNotIn("--expect-message", text)
+                self.assertNotIn("--forbid-message", text)
+                for line in (
+                    "check_rpm fprintd\n",
+                    "check_rpm fprintd-pam\n",
+                    "check_file /usr/lib64/security/pam_fprintd.so\n",
+                ):
+                    self.assertIn(line, text)
 
     def test_nvidia_kargs_come_from_akmods_module(self):
         for gate in (self.BUILD_WORKFLOW, self.LOCAL_GATE):
