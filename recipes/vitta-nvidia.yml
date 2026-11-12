@@ -1,13 +1,12 @@
-# vitta-nvidia — personal niri desktop for the ThinkPad P14s hybrid GPU
-# base-nvidia supplies the NVIDIA driver stack that base-main deliberately lacks.
-# The kargs overlay below keeps the required NVIDIA boot arguments in the image;
-# it also stops `bootc switch` from a Bluefin deployment removing them.
+# vitta-nvidia — personal niri desktop for the ThinkPad P14s hybrid GPU.
+# base-nvidia was retired upstream. BlueBuild's akmods module adds the NVIDIA
+# open driver to base-main and writes its required bootc kernel arguments.
 # CUDA toolkit stays out of the image: see recipes/bluefin-udx-nvidia.yml for
 # the atomic-filesystem rationale and the per-project container workflow.
 
 name: vitta-nvidia
-description: Vitta — personal niri desktop on Universal Blue base-nvidia
-base-image: ghcr.io/ublue-os/base-nvidia
+description: Vitta — personal niri desktop on Universal Blue base-main with NVIDIA
+base-image: ghcr.io/ublue-os/base-main
 image-version: 44
 
 modules:
@@ -20,17 +19,17 @@ modules:
   # portals, brew, docker, libvirt, tailscale, VS Code, v4l2loopback).
   - from-file: vitta-modules.yml
 
-  # NVIDIA-only boot arguments for the P14s. Keep this private overlay out of
-  # the base Vitta image so it remains safe for its Intel/AMD target.
-  - type: files
-    files:
-      - source: vitta-nvidia
-        destination: /
+  # Pulls akmods-nvidia-open and installs the driver stack, services, dracut
+  # force_drivers and /usr/lib/bootc/kargs.d/00-bluebuild-nvidia-kargs.toml.
+  # This must precede initramfs so the forced drivers reach the boot image.
+  - type: akmods
+    install: []
+    nvidia-driver: nvidia-open
 
   - type: rpm-ostree
     install:
-      # base-nvidia:44 already supplies nvtop; list it to make the NVIDIA
-      # package contract explicit, like the Noto-font contract in vitta-modules.
+      # base-main does not include nvtop; retain the explicit NVIDIA monitoring
+      # tool contract.
       - nvtop
 
   # Keep this after every other module except initramfs: earlier modules and

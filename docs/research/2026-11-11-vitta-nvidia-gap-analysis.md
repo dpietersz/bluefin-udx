@@ -1,5 +1,7 @@
 # Vitta NVIDIA gap analysis — P14s against `base-nvidia:44`
 
+> **Addendum (2026-11-11):** Upstream retired `base-nvidia` on 2026-11-07, so `vitta-nvidia` now uses `base-main:44` plus BlueBuild's `akmods` module with `nvidia-driver: nvidia-open`. The comparison against frozen `base-nvidia:44` remains valid as a description of what `nvidia-install.sh` produces. Rows marked **HAVE from base-nvidia** are now **HAVE via the akmods NVIDIA module**, proven by the CI gate rather than that image. The kargs **ADD** is satisfied by the module-owned `/usr/lib/bootc/kargs.d/00-bluebuild-nvidia-kargs.toml`; do not rewrite the historical tables below.
+
 **Scope:** Phase 0 research for `vitta-nvidia`, the P14s Gen 5 replacement for
 `bluefin-udx-nvidia`. This is a read-only analysis; it changes no recipe,
 overlay, dotfiles, host state, or image deployment. The non-NVIDIA Bluefin/DX

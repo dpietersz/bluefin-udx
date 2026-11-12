@@ -4,13 +4,11 @@ import os
 from pathlib import Path
 import re
 import subprocess
-import tomllib
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
 RECIPE = ROOT / "recipes/vitta-nvidia.yml"
-KARGS = ROOT / "files/vitta-nvidia/usr/lib/bootc/kargs.d/10-vitta-nvidia.toml"
 
 
 class VittaNvidiaRecipeTests(unittest.TestCase):
@@ -20,10 +18,10 @@ class VittaNvidiaRecipeTests(unittest.TestCase):
 
     def test_identity(self):
         recipe = self.recipe_text()
-        self.assertIn("name: vitta-nvidia", recipe)
-        self.assertIn("base-image: ghcr.io/ublue-os/base-nvidia", recipe)
-        self.assertIn("image-version: 44", recipe)
         for value in (
+            "name: vitta-nvidia",
+            "base-image: ghcr.io/ublue-os/base-main",
+            "image-version: 44",
             "ID: vitta",
             "ID_LIKE: fedora",
             'NAME: "Vitta"',
@@ -32,49 +30,44 @@ class VittaNvidiaRecipeTests(unittest.TestCase):
             "IMAGE_ID: vitta-nvidia",
         ):
             with self.subTest(value=value):
-                self.assertIn(value, recipe)
+                self.assertRegex(recipe, rf"(?m)^\s*{re.escape(value)}$")
 
     def test_module_order(self):
         recipe = self.recipe_text()
+        modules = "\n".join(
+            line for line in recipe.splitlines() if not line.lstrip().startswith("#")
+        )
         markers = (
             "source: system",
             "- from-file: common.yml",
             "- from-file: vitta-modules.yml",
-            "source: vitta-nvidia",
+            "- type: akmods",
+            "nvidia-driver: nvidia-open",
             "- type: rpm-ostree",
             "- type: os-release",
             "- type: initramfs",
         )
-        positions = [recipe.index(marker) for marker in markers]
+        positions = [modules.index(marker) for marker in markers]
         self.assertEqual(positions, sorted(positions))
-        self.assertEqual(recipe.rstrip().splitlines()[-1], "  - type: initramfs")
+        self.assertEqual(modules.rstrip().splitlines()[-1], "  - type: initramfs")
 
-    def test_kargs_exact(self):
-        self.assertTrue(KARGS.is_file(), "vitta-nvidia kernel-args overlay must exist")
-        with KARGS.open("rb") as file:
-            self.assertEqual(
-                tomllib.load(file),
-                {
-                    "kargs": [
-                        "rd.driver.blacklist=nouveau",
-                        "modprobe.blacklist=nouveau",
-                        "nvidia-drm.modeset=1",
-                        "initcall_blacklist=simpledrm_platform_driver_init",
-                    ]
-                },
-            )
-
-    def test_overlay_is_nvidia_only(self):
-        self.assertIn("source: vitta-nvidia", self.recipe_text())
-        for recipe_path in (ROOT / "recipes").glob("*.yml"):
-            if recipe_path != RECIPE:
-                with self.subTest(recipe=recipe_path.name):
-                    self.assertNotIn("source: vitta-nvidia", recipe_path.read_text())
+    def test_nvidia_driver_comes_from_akmods_module(self):
+        recipe = self.recipe_text()
+        self.assertRegex(
+            recipe,
+            r"(?m)^  - type: akmods\n    install: \[\]\n    nvidia-driver: nvidia-open$",
+        )
         for recipe_path in (ROOT / "recipes/vitta.yml", ROOT / "recipes/vitta-modules.yml"):
-            recipe = recipe_path.read_text()
             with self.subTest(recipe=recipe_path.name):
-                self.assertNotIn("vitta-nvidia", recipe)
+                recipe = recipe_path.read_text()
+                self.assertNotIn("nvidia-driver", recipe)
                 self.assertNotIn("base-nvidia", recipe)
+
+    def test_no_own_kargs_file(self):
+        self.assertEqual(list((ROOT / "files").glob("**/kargs.d/*.toml")), [])
+        for recipe_path in (ROOT / "recipes").glob("*.yml"):
+            with self.subTest(recipe=recipe_path.name):
+                self.assertNotIn("source: vitta-nvidia", recipe_path.read_text())
 
     def test_no_cuda_toolkit(self):
         self.assertNotIn("- cuda-toolkit", self.recipe_text())
@@ -113,6 +106,13 @@ class VittaNvidiaCiTests(unittest.TestCase):
         self.assertNotIn("${{", run)
         body = run.split("-c '\n", 1)[1].rsplit("\n          '", 1)[0]
         self.assertNotIn("'", body)
+
+    def test_nvidia_kargs_come_from_akmods_module(self):
+        for gate in (self.BUILD_WORKFLOW, self.LOCAL_GATE):
+            with self.subTest(gate=gate):
+                text = gate.read_text()
+                self.assertIn("/usr/lib/bootc/kargs.d/00-bluebuild-nvidia-kargs.toml", text)
+                self.assertNotIn("10-vitta-nvidia.toml", text)
 
     def test_fedora_next_covers_recipe(self):
         workflow = self.BUILD_WORKFLOW.read_text()
